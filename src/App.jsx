@@ -119,7 +119,9 @@ export default function App() {
 
  useEffect(() => {
     const savedSchoolId = localStorage.getItem('elimucards_school_id');
-    
+
+    console.log("Saved school ID:", localStorage.getItem('elimucards_school_id'));
+    console.log("Session check starting...");
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         const meta = session.user.user_metadata;
@@ -723,16 +725,16 @@ function LoginPage({ store, onLogin }) {
 
           {/* Mode: Login */}
           {mode === "login" && (
-            <div className="fade-in">
-              <button onClick={() => { setMode("choose"); setRole(null); setError(""); }} style={{ ...btn("ghost", { fontSize:13, padding:"5px 10px", marginBottom:16 }) }}>← Back</button>
-              {!role ? (
-                <div>
-                  <h2 style={{ marginBottom:20, fontSize:18 }}>Sign In As</h2>
-                  <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                    {[
-                      { r:"admin", label:"Administrator", icon:"🏫", desc:"Full system access" },
-                      { r:"teacher", label:"Teacher", icon:"📚", desc:"Grade & manage classes" },
-                      { r:"parent", label:"Parent / Guardian", icon:"👨‍👩‍👧", desc:"View your child's reports" }
+  <div className="fade-in">
+    {!role ? (
+      <div>
+        <button onClick={() => { setMode("choose"); setRole(null); setError(""); }} style={{ ...btn("ghost", { fontSize:13, padding:"5px 10px", marginBottom:16 }) }}>← Back</button>
+        <h2 style={{ marginBottom:20, fontSize:18 }}>Sign In As</h2>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {[
+                      { r:"admin", label:"Administrator", desc:"Full system access" },
+                      { r:"teacher", label:"Teacher", desc:"Grade & manage classes" },
+                      { r:"parent", label:"Parent / Guardian", desc:"View your child's reports" }
                     ].map(({ r, label, icon, desc }) => (
                       <button key={r} onClick={() => setRole(r)} style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 18px", border:`2px solid ${COLORS.border}`, borderRadius:10, background:"#fff", cursor:"pointer", textAlign:"left", transition:"all 0.15s" }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor=COLORS.teal; e.currentTarget.style.background=COLORS.tealL; }}
@@ -1068,6 +1070,43 @@ function StudentsManager({ store, updateStore, supabase }) {
     if (!confirm("Remove this student?")) return;
     updateStore(s => ({ ...s, students: s.students.filter(st => st.id !== id) }));
   }
+  const [editStudent, setEditStudent] = useState(null);
+
+function openEditStudent(student) {
+  setEditStudent({
+    id: student.id,
+    name: student.name,
+    admNo: student.admNo || student.adm_no || "",
+    gender: student.gender || "",
+    curriculum: student.curriculum || activeCurTab,
+    grade: student.grade || "",
+    stream: student.stream || "",
+  });
+}
+
+async function saveEditStudent() {
+  const { error } = await supabase
+    .from('students')
+    .update({
+      name: editStudent.name,
+      adm_no: editStudent.admNo,
+      gender: editStudent.gender,
+      grade: editStudent.grade,
+      stream: editStudent.stream,
+    })
+    .eq('id', editStudent.id);
+
+  if (error) { alert("Error updating student: " + error.message); return; }
+
+  updateStore(s => ({
+    ...s,
+    students: s.students.map(st => st.id === editStudent.id
+      ? { ...st, ...editStudent, adm_no: editStudent.admNo }
+      : st
+    )
+  }));
+  setEditStudent(null);
+}
 
   function handleCSV(file) {
     const reader = new FileReader();
@@ -1149,7 +1188,8 @@ function StudentsManager({ store, updateStore, supabase }) {
                 <td style={{ padding:"9px 14px", color:COLORS.text2 }}>{s.gender}</td>
                 <td style={{ padding:"9px 14px" }}>{s.grade}</td>
                 <td style={{ padding:"9px 14px" }}>{s.stream}</td>
-                <td style={{ padding:"9px 14px" }}>
+                <td style={{ padding:"9px 14px", display:"flex", gap:6 }}>
+                  <button onClick={() => openEditStudent(s)} style={btn("secondary", { padding:"3px 10px", fontSize:12 })}>Edit</button>
                   <button onClick={() => deleteStudent(s.id)} style={btn("danger", { padding:"3px 10px", fontSize:12 })}>Remove</button>
                 </td>
               </tr>
@@ -1172,6 +1212,19 @@ function StudentsManager({ store, updateStore, supabase }) {
           </div>
         </Modal>
       )}
+      {editStudent && (
+  <Modal title="Edit Student" onClose={() => setEditStudent(null)}>
+    <Input label="Full Name" required value={editStudent.name} onChange={e => setEditStudent(f=>({...f,name:e.target.value}))} />
+    <Input label="Admission Number" required value={editStudent.admNo} onChange={e => setEditStudent(f=>({...f,admNo:e.target.value}))} />
+    <Select label="Gender" options={["Male","Female","Other"]} value={editStudent.gender} onChange={e => setEditStudent(f=>({...f,gender:e.target.value}))} />
+    <Select label="Grade" required options={store.classes.filter(c=>c.curriculum===editStudent.curriculum).map(c=>c.grade)} value={editStudent.grade} onChange={e => setEditStudent(f=>({...f,grade:e.target.value,stream:""}))} />
+    <Select label="Stream" required options={(store.classes.find(c=>c.curriculum===editStudent.curriculum&&c.grade===editStudent.grade)?.streams||[]).map(s=>s.name)} value={editStudent.stream} onChange={e => setEditStudent(f=>({...f,stream:e.target.value}))} />
+    <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:8 }}>
+      <button style={btn("ghost")} onClick={() => setEditStudent(null)}>Cancel</button>
+      <button style={btn("primary")} onClick={saveEditStudent}>Save Changes</button>
+    </div>
+  </Modal>
+)} 
     </div>
   );
 }
@@ -1179,6 +1232,7 @@ function StudentsManager({ store, updateStore, supabase }) {
 // ─── TEACHERS MANAGER ─────────────────────────────────────────────────────────
 
 function TeachersManager({ store, updateStore, supabase }) {
+  const [activeCurTab, setActiveCurTab] = useState(store.curricula[0] || "CBC");
   const [showModal, setShowModal] = useState(false);
   const [editTeacher, setEditTeacher] = useState(null);
   const [form, setForm] = useState({ name:"", email:"", phone:"", password:"", homeClass:"", homeStream:"", curriculum:"CBC", subjectAssignments:[] });
@@ -1276,6 +1330,15 @@ async function saveEditTeacher() {
         <h1 style={{ fontSize:22, fontWeight:800 }}>Teachers</h1>
         <button style={btn("primary")} onClick={() => setShowModal(true)}>+ Add Teacher</button>
       </div>
+      {store.curricula.length > 1 && (
+        <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
+          {store.curricula.map(c => (
+            <button key={c} onClick={() => setActiveCurTab(c)} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:activeCurTab===c?(c==="CBC"?COLORS.teal:COLORS.amber):"transparent", color:activeCurTab===c?"#fff":(c==="CBC"?COLORS.teal:COLORS.amber), transition:"all 0.15s" }}>
+              {c === "CBC" ? "CBC" : "Cambridge"}
+            </button>
+         ))}
+       </div>
+     )}
       <div style={{ ...card(), overflow:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
           <thead>
@@ -1289,7 +1352,7 @@ async function saveEditTeacher() {
             {store.teachers.length === 0 && (
               <tr><td colSpan={6} style={{ padding:32, textAlign:"center", color:COLORS.text3 }}>No teachers added yet.</td></tr>
             )}
-            {store.teachers.map(t => (
+            {store.teachers.filter(t => store.curricula.length < 2 || t.curriculum === activeCurTab).map(t => (
               <tr key={t.id} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
                 <td style={{ padding:"9px 14px", fontWeight:600 }}>{t.name}</td>
                 <td style={{ padding:"9px 14px", color:COLORS.text2 }}>{t.email}</td>
@@ -1413,6 +1476,7 @@ async function saveEditTeacher() {
 // ─── PARENTS MANAGER ──────────────────────────────────────────────────────────
 
 function ParentsManager({ store, updateStore, supabase }) {
+  const [activeCurTab, setActiveCurTab] = useState(store.curricula[0] || "CBC");
   const [showModal, setShowModal] = useState(false);
   const [editParent, setEditParent] = useState(null);
   const [form, setForm] = useState({ name:"", email:"", phone:"", password:"", childIds:[] });
@@ -1496,6 +1560,15 @@ async function saveEditParent() {
         <h1 style={{ fontSize:22, fontWeight:800 }}>Parents & Guardians</h1>
         <button style={btn("primary")} onClick={() => setShowModal(true)}>+ Add Parent</button>
       </div>
+      {store.curricula.length > 1 && (
+        <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
+          {store.curricula.map(c => (
+            <button key={c} onClick={() => setActiveCurTab(c)} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:activeCurTab===c?(c==="CBC"?COLORS.teal:COLORS.amber):"transparent", color:activeCurTab===c?"#fff":(c==="CBC"?COLORS.teal:COLORS.amber), transition:"all 0.15s" }}>
+              {c === "CBC" ? "CBC" : "Cambridge"}
+            </button>
+          ))}
+        </div>
+     )}
       <div style={{ ...card(), overflow:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
           <thead>
@@ -1509,7 +1582,13 @@ async function saveEditParent() {
             {store.parents.length === 0 && (
               <tr><td colSpan={5} style={{ padding:32, textAlign:"center", color:COLORS.text3 }}>No parents added yet.</td></tr>
             )}
-            {store.parents.map(p => (
+            {store.parents.filter(p => {
+              if (store.curricula.length < 2) return true;
+              return p.child_ids || p.childIds ? (p.childIds || p.child_ids || []).some(cid => {
+                const child = store.students.find(s => s.id === cid);
+                return child?.curriculum === activeCurTab;
+             }) : true;
+           }).map(p => (
               <tr key={p.id} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
                 <td style={{ padding:"9px 14px", fontWeight:600 }}>{p.name}</td>
                 <td style={{ padding:"9px 14px", color:COLORS.text2 }}>{p.email}</td>
@@ -1520,7 +1599,10 @@ async function saveEditParent() {
                     return child ? <Badge key={cid} color={COLORS.teal2} bg={COLORS.tealL} style={{ marginRight:4 }}>{child.name}</Badge> : null;
                   })}
                 </td>
-                <td style={{ padding:"9px 14px" }}><button onClick={() => deleteParent(p.id)} style={btn("danger",{padding:"3px 10px",fontSize:12})}>Remove</button></td>
+                <td style={{ padding:"9px 14px", display:"flex", gap:6 }}>
+                  <button onClick={() => openEditParent(p)} style={btn("secondary",{padding:"3px 10px",fontSize:12})}>Edit</button>
+                  <button onClick={() => deleteParent(p.id)} style={btn("danger",{padding:"3px 10px",fontSize:12})}>Remove</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -2359,101 +2441,207 @@ function ParentApp({ store, updateStore, session, logout }) {
 }
 
 function ParentChildView({ store, child }) {
+  const [viewMode, setViewMode] = useState("comparison"); // "comparison" | "term"
+  const [selectedTerm, setSelectedTerm] = useState(store.currentTerm);
+
   const classCfg = store.classes.find(c => c.curriculum === child.curriculum && c.grade === child.grade);
   const subjects = classCfg?.subjects || [];
   const terms = ["Term 1","Term 2","Term 3"];
   const isCheckpoint = CHECKPOINT_YEARS.includes(child.grade);
 
+  function getGrade(sub, term) {
+    return store.grades?.[child.id]?.[sub]?.[term];
+  }
+
+  function getStrands(sub, term) {
+    return (store.strands || []).filter(st =>
+      st.curriculum === child.curriculum &&
+      st.grade === child.grade &&
+      st.subject === sub &&
+      st.term === term
+    );
+  }
+
+  function getSubStrands(strandId) {
+    return (store.subStrands || []).filter(ss => ss.strand_id === strandId).sort((a,b) => a.sort_order - b.sort_order);
+  }
+
+  function getOutcomes(subStrandId) {
+    return (store.learningOutcomes || []).filter(lo => lo.sub_strand_id === subStrandId).sort((a,b) => a.sort_order - b.sort_order);
+  }
+
+  function getOutcomeGrade(outcomeId, term) {
+    return store.outcomeGrades?.[child.id]?.[outcomeId]?.[term];
+  }
+
+  function GradeBadge({ g, curriculum, isCP }) {
+    if (!g) return <span style={{ color:COLORS.text3, fontSize:12 }}>—</span>;
+    if (curriculum === "CBC") return <span style={{ fontWeight:800, fontSize:12, color:CBC_GRADE_COLORS[g.grade]||COLORS.text, background:g.grade==="EE"?COLORS.tealL:g.grade==="ME"?"#dbeafe":g.grade==="AE"?COLORS.amberL:COLORS.coralL, padding:"2px 8px", borderRadius:20 }}>{g.grade||"—"}</span>;
+    if (isCP) return <span style={{ fontWeight:800, fontSize:12, color:COLORS.teal2 }}>{g.score||"—"}/50</span>;
+    return <span style={{ fontWeight:800, fontSize:12, color:COLORS.teal2 }}>{g.grade||"—"}{g.score?` (${g.score}%)`:""}</span>;
+  }
+
   return (
     <div className="fade-in">
-      <div style={{ background:`linear-gradient(135deg,${COLORS.teal3},#1a5276)`, borderRadius:14, padding:"22px 28px", color:"#fff", marginBottom:24 }}>
+      {/* Child header */}
+      <div style={{ background:`linear-gradient(135deg,${COLORS.teal3},#1a5276)`, borderRadius:14, padding:"22px 28px", color:"#fff", marginBottom:20 }}>
         <div style={{ display:"flex", alignItems:"center", gap:16 }}>
           <div style={{ width:54, height:54, borderRadius:"50%", background:"rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Sora", fontWeight:800, fontSize:22 }}>{child.name.charAt(0)}</div>
           <div>
             <div style={{ fontFamily:"Sora", fontWeight:800, fontSize:22 }}>{child.name}</div>
             <div style={{ fontSize:13, opacity:.8 }}>{child.grade} · {child.stream} · <CurriculumBadge curriculum={child.curriculum} /></div>
-            <div style={{ fontSize:12, opacity:.7, marginTop:2 }}>Adm No: {child.admNo}</div>
+            <div style={{ fontSize:12, opacity:.7, marginTop:2 }}>Adm No: {child.admNo || child.adm_no}</div>
           </div>
         </div>
       </div>
 
-      <div style={{ ...card(), overflow:"auto" }}>
-        <div style={{ padding:"16px 20px 8px", borderBottom:`1px solid ${COLORS.border}` }}>
-          <h2 style={{ fontSize:16, fontWeight:700 }}>Academic Report — {store.currentYear}</h2>
-        </div>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-          <thead>
-            <tr style={{ background:COLORS.bg }}>
-              <th style={{ padding:"10px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Subject</th>
-              {terms.map(t => (
-                <th key={t} style={{ padding:"10px 14px", textAlign:"center", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>{t}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {subjects.map(sub => (
-              <tr key={sub} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
-                <td style={{ padding:"9px 14px", fontWeight:600 }}>{sub}</td>
-                {terms.map(t => {
-                  const g = store.grades?.[child.id]?.[sub]?.[t];
+      {/* View mode toggle */}
+      <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
+        <button onClick={() => setViewMode("comparison")} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:viewMode==="comparison"?COLORS.teal:"transparent", color:viewMode==="comparison"?"#fff":COLORS.teal, transition:"all 0.15s" }}>
+          All Terms
+        </button>
+        <button onClick={() => setViewMode("term")} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:viewMode==="term"?COLORS.teal:"transparent", color:viewMode==="term"?"#fff":COLORS.teal, transition:"all 0.15s" }}>
+          Term Detail
+        </button>
+      </div>
+
+      {/* ALL TERMS COMPARISON VIEW */}
+      {viewMode === "comparison" && (
+        <div className="fade-in">
+          <div style={{ ...card(), overflow:"auto", marginBottom:16 }}>
+            <div style={{ padding:"14px 20px 8px", borderBottom:`1px solid ${COLORS.border}` }}>
+              <h2 style={{ fontSize:15, fontWeight:700 }}>Term Comparison — {store.currentYear}</h2>
+              <p style={{ fontSize:12, color:COLORS.text2, marginTop:2 }}>See your child's progress across all three terms side by side</p>
+            </div>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+              <thead>
+                <tr style={{ background:COLORS.bg }}>
+                  <th style={{ padding:"10px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Subject</th>
+                  {terms.map(t => (
+                    <th key={t} style={{ padding:"10px 14px", textAlign:"center", fontWeight:700, color:t===store.currentTerm?COLORS.teal:COLORS.text2, borderBottom:`1px solid ${COLORS.border}`, background:t===store.currentTerm?COLORS.tealL:"transparent" }}>
+                      {t}
+                      {t === store.currentTerm && <div style={{ fontSize:9, fontWeight:500, color:COLORS.teal }}>Current</div>}
+                    </th>
+                  ))}
+                  <th style={{ padding:"10px 14px", textAlign:"center", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subjects.map(sub => {
+                  const termGrades = terms.map(t => getGrade(sub, t));
+                  const gradeOrder = { EE:4, ME:3, AE:2, BE:1 };
+                  const values = termGrades.map(g => g ? (gradeOrder[g.grade] || (g.score ? g.score/25 : 0)) : null).filter(Boolean);
+                  let trend = "—";
+                  let trendColor = COLORS.text3;
+                  if (values.length >= 2) {
+                    const last = values[values.length-1];
+                    const prev = values[values.length-2];
+                    if (last > prev) { trend = "Improving"; trendColor = COLORS.teal; }
+                    else if (last < prev) { trend = "Needs attention"; trendColor = COLORS.coral; }
+                    else { trend = "Steady"; trendColor = COLORS.amber; }
+                  }
                   return (
-                    <td key={t} style={{ padding:"9px 14px", textAlign:"center" }}>
-                      {(() => {
-                        const subStrands = store.strands ? store.strands.filter(st =>
-                          st.curriculum === child.curriculum &&
-                          st.grade === child.grade &&
-                          st.subject === sub &&
-                          st.term === t
-                        ) : [];
-
-                        if (child.curriculum === "CBC" && subStrands.length > 0) {
-                          return (
-                            <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-                              {subStrands.map(strand => {
-                                const sg = store.strandGrades?.[child.id]?.[strand.id]?.[t] || "";
-                                return (
-                                  <div key={strand.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"3px 0", borderBottom:`1px solid ${COLORS.border}` }}>
-                                    <span style={{ fontSize:11, color:COLORS.text2, flex:1 }}>{strand.name}</span>
-                                    {sg
-                                      ? <span style={{ fontSize:11, fontWeight:800, color:CBC_GRADE_COLORS[sg]||COLORS.text3, background:sg==="EE"?COLORS.tealL:sg==="ME"?"#E6F1FB":sg==="AE"?COLORS.amberL:COLORS.coralL, padding:"1px 8px", borderRadius:20 }}>{sg}</span>
-                                      : <span style={{ fontSize:11, color:COLORS.text3 }}>—</span>
-                                    }
-                                  </div>
-                                );
-                              })}
-                              {g?.comment && <div style={{ fontSize:11, color:COLORS.text2, fontStyle:"italic", marginTop:4 }}>{g.comment}</div>}
-                            </div>
-                          );
-                        }
-
-                        return g ? (
-                          child.curriculum === "CBC" ? (
-                            <div>
-                              <span style={{ fontWeight:800, color:CBC_GRADE_COLORS[g.grade]||COLORS.text, display:"block" }}>{g.grade || "—"}</span>
-                              {g.grade && <span style={{ fontSize:10, color:COLORS.text3 }}>{CBC_GRADE_LABELS[g.grade]}</span>}
-                              {g.comment && <div style={{ fontSize:11, color:COLORS.text2, marginTop:2, fontStyle:"italic" }}>{g.comment}</div>}
-                            </div>
-                          ) : isCheckpoint ? (
-                            <div>
-                              <span style={{ fontWeight:800, color:COLORS.teal2 }}>{g.score || "—"}/50</span>
-                              {g.score && <CheckpointBand score={Number(g.score)} />}
-                            </div>
-                          ) : (
-                            <div>
-                              <span style={{ fontWeight:800, color:COLORS.teal2 }}>{g.grade || "—"}</span>
-                              {g.score && <span style={{ fontSize:11, color:COLORS.text3, marginLeft:4 }}>{g.score}%</span>}
-                            </div>
-                          )
-                        ) : <span style={{ color:COLORS.text3 }}>—</span>;
-                      })()}
-                    </td>
+                    <tr key={sub} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
+                      <td style={{ padding:"10px 14px", fontWeight:600 }}>{sub}</td>
+                      {terms.map(t => {
+                        const g = getGrade(sub, t);
+                        return (
+                          <td key={t} style={{ padding:"10px 14px", textAlign:"center", background:t===store.currentTerm?"rgba(204,251,241,0.2)":"transparent" }}>
+                            <GradeBadge g={g} curriculum={child.curriculum} isCP={isCheckpoint} />
+                            {g?.comment && <div style={{ fontSize:10, color:COLORS.text2, fontStyle:"italic", marginTop:2 }}>{g.comment}</div>}
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding:"10px 14px", textAlign:"center" }}>
+                        <span style={{ fontSize:11, fontWeight:600, color:trendColor }}>{trend}</span>
+                      </td>
+                    </tr>
                   );
                 })}
-              </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TERM DETAIL VIEW */}
+      {viewMode === "term" && (
+        <div className="fade-in">
+          <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+            {terms.map(t => (
+              <button key={t} onClick={() => setSelectedTerm(t)} style={{ padding:"7px 16px", borderRadius:8, border:`2px solid ${selectedTerm===t?COLORS.teal:COLORS.border}`, background:selectedTerm===t?COLORS.tealL:"#fff", fontWeight:600, fontSize:13, cursor:"pointer" }}>
+                {t}
+                {t === store.currentTerm && <span style={{ fontSize:10, color:COLORS.teal, marginLeft:4 }}>●</span>}
+              </button>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </div>
+
+          {subjects.map(sub => {
+            const g = getGrade(sub, selectedTerm);
+            const strands = getStrands(sub, selectedTerm);
+            const hasStrands = strands.length > 0;
+
+            return (
+              <div key={sub} style={{ ...card(), marginBottom:12, overflow:"hidden" }}>
+                <div style={{ padding:"12px 16px", background:COLORS.bg, borderBottom:`1px solid ${COLORS.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <span style={{ fontWeight:700, fontSize:14 }}>{sub}</span>
+                  {!hasStrands && <GradeBadge g={g} curriculum={child.curriculum} isCP={isCheckpoint} />}
+                </div>
+                <div style={{ padding:"12px 16px" }}>
+                  {hasStrands ? (
+                    strands.map(strand => {
+                      const subStrands = getSubStrands(strand.id);
+                      return (
+                        <div key={strand.id} style={{ marginBottom:12 }}>
+                          <div style={{ fontSize:12, fontWeight:700, color:COLORS.teal2, marginBottom:6, padding:"4px 0", borderBottom:`1px solid ${COLORS.border}` }}>{strand.name}</div>
+                          {subStrands.map(ss => {
+                            const outcomes = getOutcomes(ss.id);
+                            return (
+                              <div key={ss.id} style={{ marginBottom:8, paddingLeft:8 }}>
+                                <div style={{ fontSize:11, fontWeight:600, color:COLORS.text2, fontStyle:"italic", marginBottom:4 }}>{ss.name}</div>
+                                {outcomes.map(lo => {
+                                  const og = getOutcomeGrade(lo.id, selectedTerm);
+                                  return (
+                                    <div key={lo.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"4px 8px", borderBottom:`1px solid ${COLORS.border}`, fontSize:12 }}>
+                                      <span style={{ color:COLORS.text, flex:1 }}>{lo.name}</span>
+                                      {og?.grade
+                                        ? <span style={{ fontWeight:800, fontSize:11, color:CBC_GRADE_COLORS[og.grade]||COLORS.text3, background:og.grade==="EE"?COLORS.tealL:og.grade==="ME"?"#dbeafe":og.grade==="AE"?COLORS.amberL:COLORS.coralL, padding:"1px 8px", borderRadius:20 }}>{og.grade}</span>
+                                        : <span style={{ color:COLORS.text3, fontSize:11 }}>—</span>
+                                      }
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div>
+                      {g ? (
+                        <div>
+                          {child.curriculum === "CBC" && g.grade && (
+                            <div style={{ marginBottom:8 }}>
+                              <span style={{ fontSize:12, color:COLORS.text2 }}>Grade: </span>
+                              <span style={{ fontWeight:800, color:CBC_GRADE_COLORS[g.grade] }}>{g.grade}</span>
+                              <span style={{ fontSize:11, color:COLORS.text3, marginLeft:6 }}>{CBC_GRADE_LABELS[g.grade]}</span>
+                            </div>
+                          )}
+                          {g.score && <div style={{ fontSize:12, color:COLORS.text2, marginBottom:4 }}>Score: <strong>{g.score}{isCheckpoint?"/50":"%"}</strong></div>}
+                          {g.comment && <div style={{ fontSize:12, color:COLORS.text2, fontStyle:"italic" }}>{g.comment}</div>}
+                        </div>
+                      ) : (
+                        <div style={{ color:COLORS.text3, fontSize:13 }}>No grades entered yet for {selectedTerm}.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
