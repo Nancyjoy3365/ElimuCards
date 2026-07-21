@@ -4,6 +4,7 @@
 // ============================================================
 import { useState, useEffect, useRef } from "react";
 import { supabase } from './supabase'
+import { KICD_DATA } from './kicd_data'
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,10 @@ const COLORS = {
   amberL: "#fef3c7",
   coral:  "#e05a4e",
   coral2: "#c0392b",
+  blue:   "#3b82f6",
+  blueL:  "#dbeafe",
+  emerald:"#10b981",
+  emeraldL:"#d1fae5",
   coralL: "#fde8e8",
   bg:     "#f8fafc",
   card:   "#ffffff",
@@ -259,11 +264,11 @@ strands: strands || [],
 // ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
 
 const GS = `
-  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { font-size: 15px; }
-  body { font-family: 'DM Sans', sans-serif; background: ${COLORS.bg}; color: ${COLORS.text}; min-height: 100vh; }
-  h1,h2,h3,h4,h5,h6 { font-family: 'Sora', sans-serif; }
+  body { font-family: 'Plus Jakarta Sans', sans-serif; background: ${COLORS.bg}; color: ${COLORS.text}; min-height: 100vh; }
+h1,h2,h3,h4,h5,h6 { font-family: 'Plus Jakarta Sans', sans-serif; }
   button { cursor: pointer; font-family: inherit; }
   input, select, textarea { font-family: inherit; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1767,6 +1772,10 @@ function StrandsManager({ store, updateStore, supabase }) {
   const [newStrandName, setNewStrandName] = useState("");
   const [newSubStrandName, setNewSubStrandName] = useState("");
   const [newOutcomes, setNewOutcomes] = useState("");
+  const [pasteText, setPasteText] = useState("");
+  const [pasteMode, setPasteMode] = useState(false);
+  const [kicdMode, setKicdMode] = useState(false);
+  const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const gradeOptions = store.classes.filter(c => c.curriculum === selectedCurriculum).map(c => c.grade);
@@ -1778,6 +1787,76 @@ function StrandsManager({ store, updateStore, supabase }) {
     s.subject === selectedSubject &&
     s.term === store.currentTerm
   ).sort((a, b) => a.sort_order - b.sort_order);
+
+  function parsePasteText(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const result = [];
+    let currentStrand = null;
+    let currentSubStrand = null;
+    for (const line of lines) {
+      const strandMatch = line.match(/^(\d+\.0)\s+(.+)/);
+      const subStrandMatch = line.match(/^(\d+\.\d+)\s+(.+)/) && !line.match(/^(\d+\.0)\s+/);
+      if (strandMatch) {
+        currentStrand = { name: line, subStrands: [] };
+        currentSubStrand = null;
+        result.push(currentStrand);
+      } else if (subStrandMatch && currentStrand) {
+        currentSubStrand = { name: line, outcomes: [] };
+        currentStrand.subStrands.push(currentSubStrand);
+      } else if (currentSubStrand) {
+        currentSubStrand.outcomes.push(line);
+      }
+    }
+    return result;
+  }
+
+  function handlePreview() {
+    if (!pasteText.trim()) return;
+    setPreview(parsePasteText(pasteText));
+  }
+
+  async function saveStrands(strandsData) {
+    setSaving(true);
+    for (let si = 0; si < strandsData.length; si++) {
+      const strand = strandsData[si];
+      const { data: strandData, error: strandError } = await supabase.from('strands').insert({
+        school_id: store.schoolId,
+        curriculum: selectedCurriculum,
+        grade: selectedGrade,
+        subject: selectedSubject,
+        term: store.currentTerm,
+        name: strand.name,
+        sort_order: currentStrands.length + si,
+      }).select().single();
+      if (strandError) { alert("Error: " + strandError.message); setSaving(false); return; }
+      updateStore(s => ({ ...s, strands: [...(s.strands||[]), strandData] }));
+
+      for (let ssi = 0; ssi < strand.subStrands.length; ssi++) {
+        const ss = strand.subStrands[ssi];
+        const { data: ssData, error: ssError } = await supabase.from('sub_strands').insert({
+          strand_id: strandData.id, name: ss.name, sort_order: ssi
+        }).select().single();
+        if (ssError) { alert("Error: " + ssError.message); setSaving(false); return; }
+        updateStore(s => ({ ...s, subStrands: [...(s.subStrands||[]), ssData] }));
+
+        if (ss.outcomes.length > 0) {
+          const { data: outData, error: outError } = await supabase.from('learning_outcomes').insert(
+            ss.outcomes.map((name, i) => ({ sub_strand_id: ssData.id, name, sort_order: i }))
+          ).select();
+          if (outError) { alert("Error: " + outError.message); setSaving(false); return; }
+          updateStore(s => ({ ...s, learningOutcomes: [...(s.learningOutcomes||[]), ...outData] }));
+        }
+      }
+    }
+    setSaving(false);
+    return true;
+  }
+
+  async function handleSavePaste() {
+    if (!preview || preview.length === 0) return;
+    const success = await saveStrands(preview);
+    if (success) { setPasteText(""); setPreview(null); setPasteMode(false); alert("Strands saved successfully!"); }
+  }
 
   async function addStrand() {
     if (!newStrandName.trim() || !selectedGrade || !selectedSubject) return;
@@ -1803,9 +1882,9 @@ function StrandsManager({ store, updateStore, supabase }) {
     updateStore(s => ({
       ...s,
       strands: s.strands.filter(st => st.id !== strandId),
-      subStrands: s.subStrands.filter(ss => ss.strand_id !== strandId),
-      learningOutcomes: s.learningOutcomes.filter(lo => {
-        const ss = s.subStrands.find(ss => ss.id === lo.sub_strand_id);
+      subStrands: (s.subStrands||[]).filter(ss => ss.strand_id !== strandId),
+      learningOutcomes: (s.learningOutcomes||[]).filter(lo => {
+        const ss = (s.subStrands||[]).find(ss => ss.id === lo.sub_strand_id);
         return ss?.strand_id !== strandId;
       }),
     }));
@@ -1816,9 +1895,7 @@ function StrandsManager({ store, updateStore, supabase }) {
     setSaving(true);
     const existing = (store.subStrands||[]).filter(ss => ss.strand_id === strandId);
     const { data, error } = await supabase.from('sub_strands').insert({
-      strand_id: strandId,
-      name: newSubStrandName.trim(),
-      sort_order: existing.length,
+      strand_id: strandId, name: newSubStrandName.trim(), sort_order: existing.length,
     }).select().single();
     if (error) { alert("Error: " + error.message); setSaving(false); return; }
     updateStore(s => ({ ...s, subStrands: [...(s.subStrands||[]), data] }));
@@ -1831,8 +1908,8 @@ function StrandsManager({ store, updateStore, supabase }) {
     await supabase.from('sub_strands').delete().eq('id', subStrandId);
     updateStore(s => ({
       ...s,
-      subStrands: s.subStrands.filter(ss => ss.id !== subStrandId),
-      learningOutcomes: s.learningOutcomes.filter(lo => lo.sub_strand_id !== subStrandId),
+      subStrands: (s.subStrands||[]).filter(ss => ss.id !== subStrandId),
+      learningOutcomes: (s.learningOutcomes||[]).filter(lo => lo.sub_strand_id !== subStrandId),
     }));
   }
 
@@ -1841,8 +1918,9 @@ function StrandsManager({ store, updateStore, supabase }) {
     setSaving(true);
     const lines = newOutcomes.split('\n').map(l => l.trim()).filter(Boolean);
     const existing = (store.learningOutcomes||[]).filter(lo => lo.sub_strand_id === subStrandId);
-    const inserts = lines.map((name, i) => ({ sub_strand_id: subStrandId, name, sort_order: existing.length + i }));
-    const { data, error } = await supabase.from('learning_outcomes').insert(inserts).select();
+    const { data, error } = await supabase.from('learning_outcomes').insert(
+      lines.map((name, i) => ({ sub_strand_id: subStrandId, name, sort_order: existing.length + i }))
+    ).select();
     if (error) { alert("Error: " + error.message); setSaving(false); return; }
     updateStore(s => ({ ...s, learningOutcomes: [...(s.learningOutcomes||[]), ...data] }));
     setNewOutcomes("");
@@ -1851,7 +1929,7 @@ function StrandsManager({ store, updateStore, supabase }) {
 
   async function deleteOutcome(outcomeId) {
     await supabase.from('learning_outcomes').delete().eq('id', outcomeId);
-    updateStore(s => ({ ...s, learningOutcomes: s.learningOutcomes.filter(lo => lo.id !== outcomeId) }));
+    updateStore(s => ({ ...s, learningOutcomes: (s.learningOutcomes||[]).filter(lo => lo.id !== outcomeId) }));
   }
 
   return (
@@ -1879,81 +1957,182 @@ function StrandsManager({ store, updateStore, supabase }) {
                 <div style={{ fontFamily:"Sora", fontWeight:700, fontSize:16 }}>{selectedGrade} — {selectedSubject}</div>
                 <div style={{ fontSize:12, color:COLORS.text3, marginTop:2 }}>{store.currentTerm} · {currentStrands.length} strand{currentStrands.length!==1?"s":""}</div>
               </div>
-              <CurriculumBadge curriculum={selectedCurriculum} />
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <CurriculumBadge curriculum={selectedCurriculum} />
+                <button onClick={() => { setKicdMode(!kicdMode); setPasteMode(false); setPreview(null); }} style={btn(kicdMode?"primary":"secondary", { fontSize:12 })}>
+                  {kicdMode ? "Close KICD" : "Load from KICD"}
+                </button>
+                <button onClick={() => { setPasteMode(!pasteMode); setKicdMode(false); setPreview(null); }} style={btn(pasteMode?"primary":"secondary", { fontSize:12 })}>
+                  {pasteMode ? "Close Paste" : "Paste from Book"}
+                </button>
+              </div>
             </div>
 
-            {currentStrands.length === 0 && (
-              <div style={{ textAlign:"center", padding:"20px 0", color:COLORS.text3, fontSize:13 }}>
-                No strands yet. Add the first strand below.
+            {/* KICD MODE */}
+            {kicdMode && (
+              <div className="fade-in" style={{ marginBottom:16 }}>
+                {(() => {
+                  const kicdContent = KICD_DATA?.[selectedGrade]?.[selectedSubject];
+                  const kicdSubjects = KICD_DATA?.[selectedGrade] ? Object.keys(KICD_DATA[selectedGrade]) : [];
+                  if (!kicdContent) {
+                    return (
+                      <div style={{ textAlign:"center", padding:"20px", background:COLORS.amberL, borderRadius:8, fontSize:13 }}>
+                        <div style={{ fontWeight:600, marginBottom:6 }}>No KICD data available for {selectedGrade} — {selectedSubject} yet.</div>
+                        {kicdSubjects.length > 0 && <div style={{ fontSize:12, color:COLORS.text2 }}>Available for {selectedGrade}: {kicdSubjects.join(", ")}</div>}
+                        <div style={{ fontSize:12, color:COLORS.text2, marginTop:6 }}>Use "Paste from Book" to add strands manually.</div>
+                      </div>
+                    );
+                  }
+                  const totalOutcomes = kicdContent.strands.reduce((acc, s) => acc + s.subStrands.reduce((a, ss) => a + ss.outcomes.length, 0), 0);
+                  return (
+                    <div>
+                      <div style={{ background:COLORS.tealL, border:`1px solid ${COLORS.tealL2}`, borderRadius:8, padding:"10px 14px", fontSize:12, color:COLORS.teal2, marginBottom:12 }}>
+                        Official KICD curriculum design for <strong>{selectedGrade} — {selectedSubject}</strong> loaded. {kicdContent.strands.length} strands · {kicdContent.strands.reduce((acc,s)=>acc+s.subStrands.length,0)} sub-strands · {totalOutcomes} outcomes ready to save.
+                      </div>
+                      <div style={{ border:`1px solid ${COLORS.border}`, borderRadius:8, overflow:"hidden", marginBottom:12, maxHeight:300, overflowY:"auto" }}>
+                        {kicdContent.strands.map((strand, si) => (
+                          <div key={si}>
+                            <div style={{ padding:"8px 14px", background:COLORS.teal3, color:"#fff", fontSize:12, fontWeight:700 }}>{strand.name}</div>
+                            {strand.subStrands.map((ss, ssi) => (
+                              <div key={ssi}>
+                                <div style={{ padding:"6px 14px 6px 24px", background:"#1e293b", color:"#94a3b8", fontSize:11, fontWeight:600, fontStyle:"italic" }}>{ss.name}</div>
+                                {ss.outcomes.map((lo, loi) => (
+                                  <div key={loi} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 14px 5px 36px", borderBottom:`1px solid ${COLORS.border}`, fontSize:11 }}>
+                                    <span style={{ width:14, height:14, borderRadius:3, background:COLORS.tealL, border:`1.5px solid ${COLORS.teal}`, display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, color:COLORS.teal, flexShrink:0 }}>✓</span>
+                                    {lo}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <button style={{ ...btn("primary"), opacity:saving?0.6:1 }} disabled={saving} onClick={async () => {
+                          const success = await saveStrands(kicdContent.strands);
+                          if (success) { setKicdMode(false); alert("KICD strands saved successfully!"); }
+                        }}>
+                          {saving ? "Saving..." : "Save All to My School"}
+                        </button>
+                        <button style={btn("ghost")} onClick={() => setKicdMode(false)}>Cancel</button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
-            {currentStrands.map((strand, si) => {
-              const strandSubStrands = (store.subStrands||[]).filter(ss => ss.strand_id === strand.id).sort((a,b) => a.sort_order - b.sort_order);
-              return (
-                <div key={strand.id} style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:COLORS.teal3, color:"#fff", borderRadius:"8px 8px 0 0" }}>
-                    <button onClick={() => setExpandedStrand(expandedStrand===strand.id?null:strand.id)} style={{ background:"none", border:"none", color:"#fff", fontSize:13, cursor:"pointer", flex:1, textAlign:"left", fontWeight:700 }}>
-                      {expandedStrand===strand.id ? "▾" : "▸"} {strand.name}
-                    </button>
-                    <button onClick={() => deleteStrand(strand.id)} style={btn("danger", { padding:"2px 8px", fontSize:11 })}>Remove</button>
-                  </div>
-
-                  {expandedStrand === strand.id && (
-                    <div style={{ border:`1px solid ${COLORS.border}`, borderTop:"none", borderRadius:"0 0 8px 8px", padding:"12px 14px" }}>
-                      {strandSubStrands.map(ss => {
-                        const outcomes = (store.learningOutcomes||[]).filter(lo => lo.sub_strand_id === ss.id).sort((a,b) => a.sort_order - b.sort_order);
-                        return (
-                          <div key={ss.id} style={{ marginBottom:10 }}>
-                            <div style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 12px", background:COLORS.bg, borderRadius:6, marginBottom:6 }}>
-                              <button onClick={() => setExpandedSubStrand(expandedSubStrand===ss.id?null:ss.id)} style={{ background:"none", border:"none", fontSize:12, cursor:"pointer", flex:1, textAlign:"left", fontWeight:600, color:COLORS.text2, fontStyle:"italic" }}>
-                                {expandedSubStrand===ss.id ? "▾" : "▸"} {ss.name}
-                              </button>
-                              <span style={{ fontSize:11, color:COLORS.text3 }}>{outcomes.length} outcomes</span>
-                              <button onClick={() => deleteSubStrand(ss.id)} style={btn("danger", { padding:"2px 8px", fontSize:11 })}>Remove</button>
-                            </div>
-
-                            {expandedSubStrand === ss.id && (
-                              <div style={{ paddingLeft:16 }}>
-                                {outcomes.map((lo, i) => (
-                                  <div key={lo.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderBottom:`1px solid ${COLORS.border}`, fontSize:12 }}>
-                                    <span style={{ color:COLORS.text3, minWidth:20 }}>{i+1}.</span>
-                                    <span style={{ flex:1 }}>{lo.name}</span>
-                                    <button onClick={() => deleteOutcome(lo.id)} style={{ border:"none", background:"none", color:COLORS.coral, cursor:"pointer", fontWeight:700 }}>×</button>
-                                  </div>
-                                ))}
-                                <div style={{ marginTop:8 }}>
-                                  <textarea style={{ ...input(), minHeight:80, resize:"vertical", fontSize:12 }} placeholder={"Add outcomes — one per line:\nIdentify aspects of traditional culture\nIllustrate aspects practised in the county"} value={newOutcomes} onChange={e => setNewOutcomes(e.target.value)} />
-                                  <button style={{ ...btn("secondary", { fontSize:12, marginTop:6 }), opacity:saving?0.6:1 }} onClick={() => addOutcomes(ss.id)} disabled={saving}>
-                                    {saving ? "Saving..." : "+ Add Outcomes"}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-
-                      <div style={{ display:"flex", gap:8, marginTop:10 }}>
-                        <input style={{ ...input(), flex:1 }} placeholder="Add sub-strand e.g. 3.1 Aspects of Traditional Culture" value={newSubStrandName} onChange={e => setNewSubStrandName(e.target.value)} onKeyDown={e => { if(e.key==="Enter") addSubStrand(strand.id); }} />
-                        <button style={btn("secondary", { opacity:saving?0.6:1 })} onClick={() => addSubStrand(strand.id)} disabled={saving}>Add</button>
-                      </div>
-                    </div>
-                  )}
+            {/* PASTE MODE */}
+            {pasteMode && (
+              <div className="fade-in" style={{ marginBottom:16 }}>
+                <div style={{ background:COLORS.tealL, borderRadius:8, padding:"10px 14px", fontSize:12, color:COLORS.teal2, marginBottom:12 }}>
+                  Copy from your curriculum design document and paste below. Format:<br/><br/>
+                  <strong>3.0 Social Organizations</strong><br/>
+                  3.1 Aspects of Traditional Culture<br/>
+                  Identify aspects of traditional culture in the county<br/>
+                  Illustrate aspects practised in the county
                 </div>
-              );
-            })}
+                <textarea style={{ ...input(), minHeight:180, resize:"vertical", fontSize:13, fontFamily:"monospace" }}
+                  placeholder={"3.0 Social Organizations\n3.1 Aspects of Traditional Culture\nIdentify aspects of traditional culture\nIllustrate aspects practised in the county"}
+                  value={pasteText} onChange={e => { setPasteText(e.target.value); setPreview(null); }} />
+                <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                  <button style={btn("secondary")} onClick={handlePreview}>Preview</button>
+                  {preview && <button style={{ ...btn("primary"), opacity:saving?0.6:1 }} onClick={handleSavePaste} disabled={saving}>{saving?"Saving...":"Save All Strands"}</button>}
+                  <button style={btn("ghost")} onClick={() => { setPasteText(""); setPreview(null); }}>Clear</button>
+                </div>
+                {preview && (
+                  <div style={{ marginTop:14, border:`1px solid ${COLORS.border}`, borderRadius:8, overflow:"hidden" }}>
+                    <div style={{ padding:"8px 14px", background:COLORS.bg, borderBottom:`1px solid ${COLORS.border}`, fontWeight:700, fontSize:13 }}>
+                      Preview — {preview.length} strand{preview.length!==1?"s":""} detected
+                    </div>
+                    {preview.map((strand, si) => (
+                      <div key={si} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
+                        <div style={{ padding:"7px 14px", background:COLORS.teal3, color:"#fff", fontSize:12, fontWeight:700 }}>{strand.name}</div>
+                        {strand.subStrands.map((ss, ssi) => (
+                          <div key={ssi}>
+                            <div style={{ padding:"5px 14px 5px 24px", background:COLORS.bg, fontSize:11, fontWeight:600, color:COLORS.text2, fontStyle:"italic" }}>{ss.name}</div>
+                            {ss.outcomes.map((lo, loi) => (
+                              <div key={loi} style={{ padding:"4px 14px 4px 36px", fontSize:11, color:COLORS.text, borderBottom:`1px solid ${COLORS.border}` }}>{loi+1}. {lo}</div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-            <div style={{ display:"flex", gap:8, marginTop:16 }}>
-              <input style={{ ...input(), flex:1 }} placeholder="Add strand e.g. 3.0 Social Organizations" value={newStrandName} onChange={e => setNewStrandName(e.target.value)} onKeyDown={e => { if(e.key==="Enter") addStrand(); }} />
-              <button style={btn("primary", { opacity:saving?0.6:1 })} onClick={addStrand} disabled={saving}>
-                {saving ? "Adding..." : "+ Add Strand"}
-              </button>
-            </div>
+            {/* MANUAL MODE */}
+            {!pasteMode && !kicdMode && (
+              <div>
+                {currentStrands.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"20px 0", color:COLORS.text3, fontSize:13 }}>
+                    No strands yet. Use "Load from KICD" for instant setup, "Paste from Book" for quick entry, or add manually below.
+                  </div>
+                )}
 
-            <div style={{ marginTop:12, padding:"10px 14px", background:COLORS.tealL, borderRadius:8, fontSize:12, color:COLORS.teal2 }}>
-              💡 Add strands first, then sub-strands inside each strand, then paste learning outcomes one per line. Teachers will see EE/ME/AE/BE buttons per outcome.
-            </div>
+                {currentStrands.map((strand) => {
+                  const strandSubStrands = (store.subStrands||[]).filter(ss => ss.strand_id === strand.id).sort((a,b) => a.sort_order - b.sort_order);
+                  return (
+                    <div key={strand.id} style={{ marginBottom:12 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:COLORS.teal3, color:"#fff", borderRadius:"8px 8px 0 0" }}>
+                        <button onClick={() => setExpandedStrand(expandedStrand===strand.id?null:strand.id)} style={{ background:"none", border:"none", color:"#fff", fontSize:13, cursor:"pointer", flex:1, textAlign:"left", fontWeight:700 }}>
+                          {expandedStrand===strand.id ? "▾" : "▸"} {strand.name}
+                        </button>
+                        <button onClick={() => deleteStrand(strand.id)} style={btn("danger", { padding:"2px 8px", fontSize:11 })}>Remove</button>
+                      </div>
+                      {expandedStrand === strand.id && (
+                        <div style={{ border:`1px solid ${COLORS.border}`, borderTop:"none", borderRadius:"0 0 8px 8px", padding:"12px 14px" }}>
+                          {strandSubStrands.map(ss => {
+                            const outcomes = (store.learningOutcomes||[]).filter(lo => lo.sub_strand_id === ss.id).sort((a,b) => a.sort_order - b.sort_order);
+                            return (
+                              <div key={ss.id} style={{ marginBottom:10 }}>
+                                <div style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 12px", background:COLORS.bg, borderRadius:6, marginBottom:6 }}>
+                                  <button onClick={() => setExpandedSubStrand(expandedSubStrand===ss.id?null:ss.id)} style={{ background:"none", border:"none", fontSize:12, cursor:"pointer", flex:1, textAlign:"left", fontWeight:600, color:COLORS.text2, fontStyle:"italic" }}>
+                                    {expandedSubStrand===ss.id ? "▾" : "▸"} {ss.name}
+                                  </button>
+                                  <span style={{ fontSize:11, color:COLORS.text3 }}>{outcomes.length} outcomes</span>
+                                  <button onClick={() => deleteSubStrand(ss.id)} style={btn("danger", { padding:"2px 8px", fontSize:11 })}>Remove</button>
+                                </div>
+                                {expandedSubStrand === ss.id && (
+                                  <div style={{ paddingLeft:16 }}>
+                                    {outcomes.map((lo, i) => (
+                                      <div key={lo.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderBottom:`1px solid ${COLORS.border}`, fontSize:12 }}>
+                                        <span style={{ color:COLORS.text3, minWidth:20 }}>{i+1}.</span>
+                                        <span style={{ flex:1 }}>{lo.name}</span>
+                                        <button onClick={() => deleteOutcome(lo.id)} style={{ border:"none", background:"none", color:COLORS.coral, cursor:"pointer", fontWeight:700 }}>×</button>
+                                      </div>
+                                    ))}
+                                    <div style={{ marginTop:8 }}>
+                                      <textarea style={{ ...input(), minHeight:70, resize:"vertical", fontSize:12 }} placeholder="Add outcomes — one per line" value={newOutcomes} onChange={e => setNewOutcomes(e.target.value)} />
+                                      <button style={{ ...btn("secondary", { fontSize:12, marginTop:6 }), opacity:saving?0.6:1 }} onClick={() => addOutcomes(ss.id)} disabled={saving}>
+                                        {saving ? "Saving..." : "+ Add Outcomes"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                            <input style={{ ...input(), flex:1 }} placeholder="Add sub-strand e.g. 3.1 Aspects of Traditional Culture" value={newSubStrandName} onChange={e => setNewSubStrandName(e.target.value)} onKeyDown={e => { if(e.key==="Enter") addSubStrand(strand.id); }} />
+                            <button style={btn("secondary", { opacity:saving?0.6:1 })} onClick={() => addSubStrand(strand.id)} disabled={saving}>Add</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <div style={{ display:"flex", gap:8, marginTop:16 }}>
+                  <input style={{ ...input(), flex:1 }} placeholder="Add strand e.g. 3.0 Social Organizations" value={newStrandName} onChange={e => setNewStrandName(e.target.value)} onKeyDown={e => { if(e.key==="Enter") addStrand(); }} />
+                  <button style={btn("primary", { opacity:saving?0.6:1 })} onClick={addStrand} disabled={saving}>
+                    {saving ? "Adding..." : "+ Add Strand"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2012,7 +2191,9 @@ const teacher = teacherRaw ? {
 }
 
 // Teacher Grade Entry
-function TeacherGradeEntry({ store, updateStore, teacher, supabase }) {  const [selectedAssign, setSelectedAssign] = useState(null);
+function TeacherGradeEntry({ store, updateStore, teacher, supabase }) {
+  const [selectedAssign, setSelectedAssign] = useState(null);
+  const [currentStudentIdx, setCurrentStudentIdx] = useState(0);
 
   const assignments = teacher.subjectAssignments || teacher.subject_assignments || [];
 
@@ -2024,11 +2205,68 @@ function TeacherGradeEntry({ store, updateStore, teacher, supabase }) {  const [
       )
     : [];
 
-console.log("Selected assign:", selectedAssign);
-console.log("All students:", store.students);
-console.log("Filtered students:", studentsForAssign);
+  const currentStudent = studentsForAssign[currentStudentIdx] || null;
+
+  const subjectStrands = selectedAssign ? (store.strands || []).filter(st =>
+    st.curriculum === teacher.curriculum &&
+    st.grade === selectedAssign.grade &&
+    st.subject === selectedAssign.subject &&
+    st.term === store.currentTerm
+  ) : [];
+
+  const subjectSubStrands = subjectStrands.length > 0
+    ? (store.subStrands || []).filter(ss => subjectStrands.some(st => st.id === ss.strand_id))
+        .sort((a, b) => a.sort_order - b.sort_order)
+    : [];
+
+  const subjectOutcomes = subjectSubStrands.length > 0
+    ? (store.learningOutcomes || []).filter(lo => subjectSubStrands.some(ss => ss.id === lo.sub_strand_id))
+        .sort((a, b) => a.sort_order - b.sort_order)
+    : [];
+
+  const hasOutcomes = subjectOutcomes.length > 0;
+
+  const term = store.currentTerm;
+  const isCheckpoint = selectedAssign && CHECKPOINT_YEARS.includes(selectedAssign.grade);
+
+  function getStudentProgress(studentId) {
+    if (!hasOutcomes) return null;
+    const graded = subjectOutcomes.filter(lo => store.outcomeGrades?.[studentId]?.[lo.id]?.[term]?.grade).length;
+    return { graded, total: subjectOutcomes.length };
+  }
+
+  async function setStrandGrade(studentId, outcomeId, term, gradeValue) {
+    updateStore(s => {
+      const og = JSON.parse(JSON.stringify(s.outcomeGrades || {}));
+      if (!og[studentId]) og[studentId] = {};
+      if (!og[studentId][outcomeId]) og[studentId][outcomeId] = {};
+      if (!og[studentId][outcomeId][term]) og[studentId][outcomeId][term] = {};
+      og[studentId][outcomeId][term].grade = gradeValue;
+      return { ...s, outcomeGrades: og };
+    });
+    const { error } = await supabase.from('outcome_grades').upsert({
+      student_id: studentId, outcome_id: outcomeId, term,
+      grade_value: gradeValue, updated_at: new Date().toISOString(),
+    }, { onConflict: 'student_id,outcome_id,term' });
+    if (error) console.error("Outcome grade error:", error);
+  }
+
+  async function setOutcomeReflection(studentId, outcomeId, term, reflection) {
+    updateStore(s => {
+      const og = JSON.parse(JSON.stringify(s.outcomeGrades || {}));
+      if (!og[studentId]) og[studentId] = {};
+      if (!og[studentId][outcomeId]) og[studentId][outcomeId] = {};
+      if (!og[studentId][outcomeId][term]) og[studentId][outcomeId][term] = {};
+      og[studentId][outcomeId][term].reflection = reflection;
+      return { ...s, outcomeGrades: og };
+    });
+    await supabase.from('outcome_grades').upsert({
+      student_id: studentId, outcome_id: outcomeId, term,
+      reflection, updated_at: new Date().toISOString(),
+    }, { onConflict: 'student_id,outcome_id,term' });
+  }
+
   async function setGradeForStudent(studentId, subject, term, field, value) {
-    // Update local state instantly for responsive UI
     updateStore(s => {
       const grades = JSON.parse(JSON.stringify(s.grades || {}));
       if (!grades[studentId]) grades[studentId] = {};
@@ -2037,181 +2275,232 @@ console.log("Filtered students:", studentsForAssign);
       grades[studentId][subject][term][field] = value;
       return { ...s, grades };
     });
-
-    // Save to Supabase
     const existing = store.grades?.[studentId]?.[subject]?.[term] || {};
-    const gradeData = {
-      student_id: studentId,
-      subject: subject,
-      term: term,
+    const { error } = await supabase.from('grades').upsert({
+      student_id: studentId, subject, term,
       grade_value: field === "grade" ? value : (existing.grade || null),
       score: field === "score" ? Number(value) : (existing.score || null),
       comment: field === "comment" ? value : (existing.comment || null),
       updated_at: new Date().toISOString(),
-    };
-
-    const { error } = await supabase
-      .from('grades')
-      .upsert(gradeData, { onConflict: 'student_id,subject,term' });
-
-if (error) console.error("Grade save error:", error);
-else console.log("Grade saved successfully:", gradeData);
+    }, { onConflict: 'student_id,subject,term' });
+    if (error) console.error("Grade save error:", error);
   }
 
-  const term = store.currentTerm;
-
-  const subjectStrands = store.strands ? store.strands.filter(st =>
-    st.curriculum === teacher.curriculum &&
-    st.grade === selectedAssign?.grade &&
-    st.subject === selectedAssign?.subject &&
-    st.term === store.currentTerm
-  ) : [];
-
-  async function setStrandGrade(studentId, strandId, term, gradeValue) {
-    updateStore(s => {
-      const sg = JSON.parse(JSON.stringify(s.strandGrades || {}));
-      if (!sg[studentId]) sg[studentId] = {};
-      if (!sg[studentId][strandId]) sg[studentId][strandId] = {};
-      sg[studentId][strandId][term] = gradeValue;
-      return { ...s, strandGrades: sg };
-    });
-    const { error } = await supabase
-      .from('strand_grades')
-      .upsert({
-        student_id: studentId,
-        strand_id: strandId,
-        term: term,
-        grade_value: gradeValue,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'student_id,strand_id,term' });
-    if (error) console.error("Strand grade error:", error);
-  }
-
-  const isCheckpoint = selectedAssign && CHECKPOINT_YEARS.includes(selectedAssign.grade);
-  
   return (
     <div>
-      <h1 style={{ fontSize:22, fontWeight:800, marginBottom:6 }}>Grade Entry</h1>
-      <p style={{ color:COLORS.text2, fontSize:14, marginBottom:20 }}>Active Term: <strong>{term}</strong></p>
+      {/* Header */}
+      <div style={{ marginBottom:20 }}>
+        <h1 style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Grade Entry</h1>
+        <p style={{ color:COLORS.text2, fontSize:14 }}>Active Term: <strong>{term}</strong></p>
+      </div>
 
+      {/* Assignment selector */}
       {assignments.length === 0 && (
         <div style={{ textAlign:"center", padding:"40px 0", color:COLORS.text3 }}>No subject assignments. Contact the administrator.</div>
       )}
 
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:20 }}>
-        {assignments.map((a, i) => (
-          <button key={a.id || i} onClick={() => setSelectedAssign(selectedAssign===a?null:a)} style={{ padding:"8px 16px", borderRadius:8, border:`2px solid ${selectedAssign===a?COLORS.teal:COLORS.border}`, background:selectedAssign===a?COLORS.tealL:"#fff", fontWeight:600, fontSize:13, cursor:"pointer" }}>
-            {a.grade}{a.stream?` (${a.stream})`:""} — {a.subject}
-          </button>
-        ))}
+        {assignments.map((a, i) => {
+          const isActive = selectedAssign === a;
+          const totalStudents = store.students.filter(s =>
+            s.curriculum === teacher.curriculum && s.grade === a.grade &&
+            (a.stream ? s.stream === a.stream : true)
+          ).length;
+          return (
+            <button key={a.id || i} onClick={() => { setSelectedAssign(isActive ? null : a); setCurrentStudentIdx(0); }}
+              style={{ padding:"10px 16px", borderRadius:10, border:`2px solid ${isActive ? COLORS.teal : COLORS.border}`, background:isActive ? COLORS.tealL : "#fff", fontWeight:600, fontSize:13, cursor:"pointer", transition:"all 0.15s", textAlign:"left" }}>
+              <div style={{ color:isActive ? COLORS.teal2 : COLORS.text }}>{a.grade}{a.stream ? ` (${a.stream})` : ""}</div>
+              <div style={{ fontSize:11, color:isActive ? COLORS.teal : COLORS.text3, marginTop:2 }}>{a.subject} · {totalStudents} students</div>
+            </button>
+          );
+        })}
       </div>
 
       {selectedAssign && (
         <div className="fade-in">
-          <div style={{ background:`linear-gradient(135deg,${COLORS.teal},${COLORS.teal2})`, borderRadius:12, padding:"14px 20px", color:"#fff", marginBottom:16 }}>
-            <div style={{ fontWeight:700, fontSize:18 }}>{selectedAssign.subject}</div>
-            <div style={{ fontSize:12, opacity:.8 }}>{selectedAssign.grade}{selectedAssign.stream?` · ${selectedAssign.stream}`:""} · {teacher.curriculum} · {term}</div>
+          {/* Subject banner */}
+          <div style={{ background:`linear-gradient(135deg, ${COLORS.teal}, ${COLORS.teal2})`, borderRadius:12, padding:"16px 22px", color:"#fff", marginBottom:16 }}>
+            <div style={{ fontWeight:800, fontSize:18 }}>{selectedAssign.subject}</div>
+            <div style={{ fontSize:12, opacity:.8, marginTop:2 }}>{selectedAssign.grade}{selectedAssign.stream ? ` · ${selectedAssign.stream}` : ""} · {teacher.curriculum} · {term}</div>
           </div>
-          <div style={{ ...card(), overflow:"auto" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-              <thead>
-                <tr style={{ background:COLORS.bg }}>
-                  <th style={{ padding:"10px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Student</th>
-                  {teacher.curriculum === "CBC" ? (
-                    <>
-                      <th style={{ padding:"10px 14px", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>{subjectStrands.length > 0 ? "Strands" : "Grade"}</th>
-                      <th style={{ padding:"10px 14px", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Comment</th>
-                    </>
-                  ) : isCheckpoint ? (
-                    <th style={{ padding:"10px 14px", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Score (0–50)</th>
-                  ) : (
-                    <>
-                      <th style={{ padding:"10px 14px", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Score (%)</th>
-                      <th style={{ padding:"10px 14px", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Letter</th>
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {studentsForAssign.length === 0 && (
-                  <tr><td colSpan={3} style={{ padding:24, textAlign:"center", color:COLORS.text3 }}>No students in this class/stream.</td></tr>
-                )}
-                {studentsForAssign.map(s => {
-                  const gradeData = store.grades?.[s.id]?.[selectedAssign.subject]?.[term] || {};
+
+          {/* Student tabs */}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:16 }}>
+            {studentsForAssign.map((s, i) => {
+              const prog = getStudentProgress(s.id);
+              const isDone = prog && prog.graded === prog.total && prog.total > 0;
+              const isCurrent = i === currentStudentIdx;
+              return (
+                <button key={s.id} onClick={() => setCurrentStudentIdx(i)}
+                  style={{ padding:"6px 14px", borderRadius:8, border:`2px solid ${isCurrent ? COLORS.teal : isDone ? COLORS.emerald || "#10b981" : COLORS.border}`, background:isCurrent ? COLORS.tealL : isDone ? (COLORS.emeraldL || "#d1fae5") : "#fff", fontWeight:600, fontSize:12, cursor:"pointer", transition:"all 0.15s", color:isCurrent ? COLORS.teal2 : isDone ? "#059669" : COLORS.text2 }}>
+                  {s.name.split(" ")[0]} {isDone ? "✓" : ""}
+                </button>
+              );
+            })}
+          </div>
+
+          {studentsForAssign.length === 0 && (
+            <div style={{ textAlign:"center", padding:32, color:COLORS.text3 }}>No students in this class/stream.</div>
+          )}
+
+          {currentStudent && (
+            <div className="fade-in">
+              {/* Student card header */}
+              <div style={{ ...card(), padding:"16px 20px", marginBottom:14, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                  <div style={{ width:44, height:44, borderRadius:"50%", background:`linear-gradient(135deg,${COLORS.teal},${COLORS.teal2})`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:800, fontSize:18 }}>
+                    {currentStudent.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:16 }}>{currentStudent.name}</div>
+                    <div style={{ fontSize:12, color:COLORS.text2 }}>Adm: {currentStudent.admNo || currentStudent.adm_no} · Student {currentStudentIdx + 1} of {studentsForAssign.length}</div>
+                  </div>
+                </div>
+                {hasOutcomes && (() => {
+                  const prog = getStudentProgress(currentStudent.id);
+                  const pct = prog ? Math.round(prog.graded / prog.total * 100) : 0;
                   return (
-                    <tr key={s.id} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
-                      <td style={{ padding:"8px 14px", fontWeight:500 }}>{s.name}</td>
-                      {teacher.curriculum === "CBC" ? (
-                        <>
-                          <td style={{ padding:"8px 14px" }}>
-                            {subjectStrands.length > 0 ? (
-                              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                                {subjectStrands.map(strand => {
-                                  const strandGrade = store.strandGrades?.[s.id]?.[strand.id]?.[term] || "";
-                                  return (
-                                    <div key={strand.id} style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
-                                      <span style={{ fontSize:11, color:COLORS.text2, minWidth:150 }}>{strand.name}</span>
-                                      <div style={{ display:"flex", gap:4 }}>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:pct===100?"#059669":COLORS.teal }}>{prog?.graded}/{prog?.total} outcomes</div>
+                      <div style={{ width:80, height:6, background:COLORS.border, borderRadius:3, marginTop:4, overflow:"hidden" }}>
+                        <div style={{ width:`${pct}%`, height:"100%", background:pct===100?"#10b981":COLORS.teal, borderRadius:3, transition:"width 0.3s" }} />
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* CBC with outcomes */}
+              {teacher.curriculum === "CBC" && hasOutcomes && (
+                <div style={{ ...card(), overflow:"hidden", marginBottom:14 }}>
+                  {subjectStrands.map(strand => {
+                    const strandSubs = subjectSubStrands.filter(ss => ss.strand_id === strand.id);
+                    return (
+                      <div key={strand.id}>
+                        <div style={{ padding:"9px 16px", background:COLORS.teal3, color:"#fff", fontSize:12, fontWeight:700 }}>{strand.name}</div>
+                        {strandSubs.map(ss => {
+                          const ssOutcomes = subjectOutcomes.filter(lo => lo.sub_strand_id === ss.id);
+                          return (
+                            <div key={ss.id}>
+                              <div style={{ padding:"6px 16px 5px 24px", background:"#1e293b", color:"#94a3b8", fontSize:11, fontWeight:600, fontStyle:"italic" }}>{ss.name}</div>
+                              {ssOutcomes.map((lo, loi) => {
+                                const og = store.outcomeGrades?.[currentStudent.id]?.[lo.id]?.[term];
+                                const currentGrade = og?.grade || "";
+                                return (
+                                  <div key={lo.id} style={{ padding:"10px 16px 10px 32px", borderBottom:`1px solid ${COLORS.border}`, background:"#fff" }}>
+                                    <div style={{ fontSize:12, color:COLORS.text, marginBottom:8, lineHeight:1.5 }}>
+                                      <span style={{ fontSize:10, color:COLORS.text3, fontWeight:600, marginRight:6 }}>{loi + 1}.</span>
+                                      {lo.name}
+                                    </div>
+                                    <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                                      <div style={{ display:"flex", gap:6 }}>
                                         {CBC_GRADES_STR.map(g => (
-                                          <button key={g} onClick={() => setStrandGrade(s.id, strand.id, term, g)}
-                                            style={{ padding:"2px 8px", borderRadius:20, border:`1.5px solid ${strandGrade===g?CBC_GRADE_COLORS[g]:COLORS.border}`, background:strandGrade===g?CBC_GRADE_COLORS[g]:"#fff", color:strandGrade===g?"#fff":COLORS.text2, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                                          <button key={g} onClick={() => setStrandGrade(currentStudent.id, lo.id, term, g)}
+                                            style={{ padding:"5px 12px", borderRadius:8, border:`2px solid ${currentGrade===g ? CBC_GRADE_COLORS[g] : COLORS.border}`, background:currentGrade===g ? CBC_GRADE_COLORS[g] : "#fff", color:currentGrade===g ? "#fff" : COLORS.text2, fontSize:12, fontWeight:700, cursor:"pointer", transition:"all 0.15s" }}>
                                             {g}
                                           </button>
                                         ))}
                                       </div>
+                                      <input style={{ ...input(), flex:1, minWidth:180, fontSize:12, padding:"5px 10px" }}
+                                        placeholder="Reflection (optional)…"
+                                        value={og?.reflection || ""}
+                                        onChange={e => setOutcomeReflection(currentStudent.id, lo.id, term, e.target.value)} />
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <select style={{ ...input(), width:90 }} value={gradeData.grade||""} onChange={e => setGradeForStudent(s.id, selectedAssign.subject, term, "grade", e.target.value)}>
-                                <option value="">—</option>
-                                {CBC_GRADES_STR.map(g => <option key={g} value={g}>{g}</option>)}
-                              </select>
-                            )}
-                          </td>
-                          <td style={{ padding:"8px 14px" }}>
-                            <input style={{ ...input(), minWidth:200 }} placeholder="Teacher comment…" value={gradeData.comment||""} onChange={e => setGradeForStudent(s.id, selectedAssign.subject, term, "comment", e.target.value)} />
-                          </td>
-                        </>
-                      ) : isCheckpoint ? (
-                        <td style={{ padding:"8px 14px" }}>
-                          <input style={{ ...input(), width:80 }} type="number" min="0" max="50" placeholder="0–50" value={gradeData.score||""} onChange={e => setGradeForStudent(s.id, selectedAssign.subject, term, "score", e.target.value)} />
-                          {gradeData.score && <CheckpointBand score={Number(gradeData.score)} />}
-                        </td>
-                      ) : (
-                        <>
-                          <td style={{ padding:"8px 14px" }}>
-                            <input style={{ ...input(), width:80 }} type="number" min="0" max="100" placeholder="%" value={gradeData.score||""} onChange={e => setGradeForStudent(s.id, selectedAssign.subject, term, "score", e.target.value)} />
-                          </td>
-                          <td style={{ padding:"8px 14px" }}>
-                            <select style={{ ...input(), width:70 }} value={gradeData.grade||""} onChange={e => setGradeForStudent(s.id, selectedAssign.subject, term, "grade", e.target.value)}>
-                              <option value="">—</option>
-                              {CAM_LETTER_GRADES.map(g => <option key={g} value={g}>{g}</option>)}
-                            </select>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* CBC without outcomes — simple grade */}
+              {teacher.curriculum === "CBC" && !hasOutcomes && (
+                <div style={{ ...card(), padding:"16px 20px", marginBottom:14 }}>
+                  <div style={{ fontSize:13, fontWeight:600, marginBottom:12, color:COLORS.text2 }}>Overall Grade</div>
+                  <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                    {CBC_GRADES_STR.map(g => {
+                      const gradeData = store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term] || {};
+                      const current = gradeData.grade || "";
+                      return (
+                        <button key={g} onClick={() => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "grade", g)}
+                          style={{ flex:1, padding:"12px 0", borderRadius:10, border:`2px solid ${current===g ? CBC_GRADE_COLORS[g] : COLORS.border}`, background:current===g ? CBC_GRADE_COLORS[g] : "#fff", color:current===g ? "#fff" : COLORS.text2, fontSize:14, fontWeight:800, cursor:"pointer", transition:"all 0.15s" }}>
+                          <div>{g}</div>
+                          <div style={{ fontSize:9, fontWeight:500, marginTop:2, opacity:.8 }}>{CBC_GRADE_LABELS[g]}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input style={{ ...input(), fontSize:13 }} placeholder="Teacher comment…"
+                    value={store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.comment || ""}
+                    onChange={e => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "comment", e.target.value)} />
+                </div>
+              )}
+
+              {/* Cambridge */}
+              {teacher.curriculum === "Cambridge" && (
+                <div style={{ ...card(), padding:"16px 20px", marginBottom:14 }}>
+                  {isCheckpoint ? (
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:600, marginBottom:10, color:COLORS.text2 }}>Checkpoint Score (0–50)</div>
+                      <input style={{ ...input(), maxWidth:120, fontSize:20, fontWeight:800, textAlign:"center" }}
+                        type="number" min="0" max="50" placeholder="0–50"
+                        value={store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.score || ""}
+                        onChange={e => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "score", e.target.value)} />
+                      {store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.score &&
+                        <CheckpointBand score={Number(store.grades[currentStudent.id][selectedAssign.subject][term].score)} />}
+                    </div>
+                  ) : (
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:600, marginBottom:8, color:COLORS.text2 }}>Score (%)</div>
+                        <input style={{ ...input(), fontSize:20, fontWeight:800, textAlign:"center" }}
+                          type="number" min="0" max="100" placeholder="%"
+                          value={store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.score || ""}
+                          onChange={e => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "score", e.target.value)} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:600, marginBottom:8, color:COLORS.text2 }}>Letter Grade</div>
+                        <div style={{ display:"flex", gap:6 }}>
+                          {CAM_LETTER_GRADES.map(g => {
+                            const current = store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.grade || "";
+                            return (
+                              <button key={g} onClick={() => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "grade", g)}
+                                style={{ flex:1, padding:"10px 0", borderRadius:8, border:`2px solid ${current===g ? COLORS.teal : COLORS.border}`, background:current===g ? COLORS.teal : "#fff", color:current===g ? "#fff" : COLORS.text2, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+                                {g}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Save & Next / Previous navigation */}
+              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                <button onClick={() => setCurrentStudentIdx(i => Math.max(0, i - 1))} disabled={currentStudentIdx === 0}
+                  style={{ ...btn("ghost"), opacity:currentStudentIdx===0?0.4:1 }}>← Previous</button>
+                <div style={{ flex:1, textAlign:"center", fontSize:12, color:COLORS.text3 }}>
+                  {currentStudentIdx + 1} of {studentsForAssign.length} students
+                </div>
+                {currentStudentIdx < studentsForAssign.length - 1 ? (
+                  <button onClick={() => setCurrentStudentIdx(i => i + 1)} style={btn("primary")}>Save & Next →</button>
+                ) : (
+                  <button style={btn("primary", { background:"#10b981" })}>All Done ✓</button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
-}
-
-function CheckpointBand({ score }) {
-  let band = "", color = COLORS.text3;
-  if (score >= 41) { band = "Outstanding"; color = COLORS.teal; }
-  else if (score >= 31) { band = "High"; color = "#2563eb"; }
-  else if (score >= 21) { band = "Good"; color = COLORS.amber; }
-  else if (score >= 11) { band = "Aspiring"; color = COLORS.coral; }
-  else if (score >= 1)  { band = "Basic"; color = COLORS.coral2; }
-  return band ? <span style={{ fontSize:11, fontWeight:700, color, marginLeft:6 }}>{band}</span> : null;
 }
 
 // Teacher Home Class — read-only aggregated grid
@@ -2441,13 +2730,25 @@ function ParentApp({ store, updateStore, session, logout }) {
 }
 
 function ParentChildView({ store, child }) {
-  const [viewMode, setViewMode] = useState("comparison"); // "comparison" | "term"
   const [selectedTerm, setSelectedTerm] = useState(store.currentTerm);
 
   const classCfg = store.classes.find(c => c.curriculum === child.curriculum && c.grade === child.grade);
   const subjects = classCfg?.subjects || [];
-  const terms = ["Term 1","Term 2","Term 3"];
+  const terms = ["Term 1", "Term 2", "Term 3"];
   const isCheckpoint = CHECKPOINT_YEARS.includes(child.grade);
+
+  const subjectColors = [
+    { bg:"#ccfbf1", fg:COLORS.teal2, border:COLORS.tealL2 },
+    { bg:"#fef3c7", fg:COLORS.amber2, border:"#fcd34d" },
+    { bg:"#fde8e8", fg:COLORS.coral2, border:COLORS.coral },
+    { bg:"#dbeafe", fg:"#1d4ed8", border:"#93c5fd" },
+    { bg:"#d1fae5", fg:"#059669", border:"#6ee7b7" },
+    { bg:"#ede9fe", fg:"#7c3aed", border:"#c4b5fd" },
+    { bg:"#fff7ed", fg:COLORS.amber, border:"#fed7aa" },
+    { bg:"#f0f9ff", fg:"#0284c7", border:"#7dd3fc" },
+    { bg:"#fdf4ff", fg:"#a21caf", border:"#e879f9" },
+    { bg:"#f0fdf4", fg:"#15803d", border:"#86efac" },
+  ];
 
   function getGrade(sub, term) {
     return store.grades?.[child.id]?.[sub]?.[term];
@@ -2463,187 +2764,215 @@ function ParentChildView({ store, child }) {
   }
 
   function getSubStrands(strandId) {
-    return (store.subStrands || []).filter(ss => ss.strand_id === strandId).sort((a,b) => a.sort_order - b.sort_order);
+    return (store.subStrands || []).filter(ss => ss.strand_id === strandId).sort((a, b) => a.sort_order - b.sort_order);
   }
 
   function getOutcomes(subStrandId) {
-    return (store.learningOutcomes || []).filter(lo => lo.sub_strand_id === subStrandId).sort((a,b) => a.sort_order - b.sort_order);
+    return (store.learningOutcomes || []).filter(lo => lo.sub_strand_id === subStrandId).sort((a, b) => a.sort_order - b.sort_order);
   }
 
   function getOutcomeGrade(outcomeId, term) {
     return store.outcomeGrades?.[child.id]?.[outcomeId]?.[term];
   }
 
-  function GradeBadge({ g, curriculum, isCP }) {
-    if (!g) return <span style={{ color:COLORS.text3, fontSize:12 }}>—</span>;
-    if (curriculum === "CBC") return <span style={{ fontWeight:800, fontSize:12, color:CBC_GRADE_COLORS[g.grade]||COLORS.text, background:g.grade==="EE"?COLORS.tealL:g.grade==="ME"?"#dbeafe":g.grade==="AE"?COLORS.amberL:COLORS.coralL, padding:"2px 8px", borderRadius:20 }}>{g.grade||"—"}</span>;
-    if (isCP) return <span style={{ fontWeight:800, fontSize:12, color:COLORS.teal2 }}>{g.score||"—"}/50</span>;
-    return <span style={{ fontWeight:800, fontSize:12, color:COLORS.teal2 }}>{g.grade||"—"}{g.score?` (${g.score}%)`:""}</span>;
+  function GradePill({ grade, size="sm" }) {
+    if (!grade) return <span style={{ fontSize:size==="sm"?10:12, color:COLORS.text3 }}>—</span>;
+    const colors = { EE:["#ccfbf1","#0f766e"], ME:["#dbeafe","#1d4ed8"], AE:["#fef3c7","#b45309"], BE:["#fee2e2","#b91c1c"] };
+    const [bg, fg] = colors[grade] || ["#f1f5f9","#64748b"];
+    return <span style={{ fontSize:size==="sm"?10:12, fontWeight:800, padding:size==="sm"?"1px 7px":"3px 10px", borderRadius:20, background:bg, color:fg }}>{grade}</span>;
+  }
+
+  // Overall trend
+  function getTrend(sub) {
+    const gradeOrder = { EE:4, ME:3, AE:2, BE:1 };
+    const values = terms.map(t => {
+      const strands = getStrands(sub, t);
+      if (strands.length > 0) {
+        const allOutcomes = strands.flatMap(st => getSubStrands(st.id).flatMap(ss => getOutcomes(ss.id)));
+        const grades = allOutcomes.map(lo => getOutcomeGrade(lo.id, t)?.grade).filter(Boolean);
+        if (grades.length === 0) return null;
+        return grades.reduce((acc, g) => acc + (gradeOrder[g] || 0), 0) / grades.length;
+      }
+      const g = getGrade(sub, t);
+      return g?.grade ? gradeOrder[g.grade] : null;
+    }).filter(v => v !== null);
+    if (values.length < 2) return null;
+    const diff = values[values.length-1] - values[values.length-2];
+    if (diff > 0) return { label:"Improving", color:"#059669", icon:"↑" };
+    if (diff < 0) return { label:"Needs attention", color:COLORS.coral, icon:"↓" };
+    return { label:"Steady", color:COLORS.amber, icon:"→" };
   }
 
   return (
     <div className="fade-in">
       {/* Child header */}
-      <div style={{ background:`linear-gradient(135deg,${COLORS.teal3},#1a5276)`, borderRadius:14, padding:"22px 28px", color:"#fff", marginBottom:20 }}>
+      <div style={{ background:`linear-gradient(135deg, ${COLORS.teal3}, #1a5276)`, borderRadius:16, padding:"22px 28px", color:"#fff", marginBottom:24 }}>
         <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-          <div style={{ width:54, height:54, borderRadius:"50%", background:"rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Sora", fontWeight:800, fontSize:22 }}>{child.name.charAt(0)}</div>
+          <div style={{ width:56, height:56, borderRadius:"50%", background:"rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:24 }}>
+            {child.name.charAt(0)}
+          </div>
           <div>
-            <div style={{ fontFamily:"Sora", fontWeight:800, fontSize:22 }}>{child.name}</div>
-            <div style={{ fontSize:13, opacity:.8 }}>{child.grade} · {child.stream} · <CurriculumBadge curriculum={child.curriculum} /></div>
-            <div style={{ fontSize:12, opacity:.7, marginTop:2 }}>Adm No: {child.admNo || child.adm_no}</div>
+            <div style={{ fontWeight:800, fontSize:22, letterSpacing:-0.5 }}>{child.name}</div>
+            <div style={{ fontSize:13, opacity:.8, marginTop:2 }}>{child.grade} · {child.stream} · <CurriculumBadge curriculum={child.curriculum} /></div>
+            <div style={{ fontSize:11, opacity:.65, marginTop:2 }}>Adm: {child.admNo || child.adm_no}</div>
+          </div>
+          <div style={{ marginLeft:"auto", textAlign:"right" }}>
+            <div style={{ fontSize:11, opacity:.7 }}>Academic Year</div>
+            <div style={{ fontWeight:800, fontSize:18 }}>{store.currentYear}</div>
           </div>
         </div>
       </div>
 
-      {/* View mode toggle */}
-      <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
-        <button onClick={() => setViewMode("comparison")} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:viewMode==="comparison"?COLORS.teal:"transparent", color:viewMode==="comparison"?"#fff":COLORS.teal, transition:"all 0.15s" }}>
-          All Terms
-        </button>
-        <button onClick={() => setViewMode("term")} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:viewMode==="term"?COLORS.teal:"transparent", color:viewMode==="term"?"#fff":COLORS.teal, transition:"all 0.15s" }}>
-          Term Detail
-        </button>
+      {/* Term selector */}
+      <div style={{ display:"flex", gap:6, marginBottom:20 }}>
+        {terms.map(t => (
+          <button key={t} onClick={() => setSelectedTerm(t)}
+            style={{ flex:1, padding:"10px 0", borderRadius:10, border:`2px solid ${selectedTerm===t ? COLORS.teal : COLORS.border}`, background:selectedTerm===t ? COLORS.tealL : "#fff", fontWeight:700, fontSize:13, cursor:"pointer", color:selectedTerm===t ? COLORS.teal2 : COLORS.text2, transition:"all 0.15s", textAlign:"center" }}>
+            {t}
+            {t === store.currentTerm && <div style={{ fontSize:9, color:COLORS.teal, fontWeight:500 }}>Current</div>}
+          </button>
+        ))}
       </div>
 
-      {/* ALL TERMS COMPARISON VIEW */}
-      {viewMode === "comparison" && (
-        <div className="fade-in">
-          <div style={{ ...card(), overflow:"auto", marginBottom:16 }}>
-            <div style={{ padding:"14px 20px 8px", borderBottom:`1px solid ${COLORS.border}` }}>
-              <h2 style={{ fontSize:15, fontWeight:700 }}>Term Comparison — {store.currentYear}</h2>
-              <p style={{ fontSize:12, color:COLORS.text2, marginTop:2 }}>See your child's progress across all three terms side by side</p>
+      {/* Subject cards grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:14, marginBottom:20 }}>
+        {subjects.map((sub, si) => {
+          const col = subjectColors[si % subjectColors.length];
+          const strands = getStrands(sub, selectedTerm);
+          const hasStrands = strands.length > 0;
+          const g = getGrade(sub, selectedTerm);
+          const trend = getTrend(sub);
+
+          return (
+            <div key={sub} style={{ background:"#fff", borderRadius:12, border:`1.5px solid ${col.border}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
+              {/* Subject header */}
+              <div style={{ background:col.bg, padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ fontWeight:700, fontSize:13, color:col.fg }}>{sub}</div>
+                {trend && (
+                  <span style={{ fontSize:11, fontWeight:700, color:trend.color, background:"#fff", padding:"1px 8px", borderRadius:20 }}>
+                    {trend.icon} {trend.label}
+                  </span>
+                )}
+              </div>
+
+              {/* Content */}
+              <div style={{ padding:"10px 14px" }}>
+                {hasStrands ? (
+                  strands.map(strand => {
+                    const subs = getSubStrands(strand.id);
+                    return (
+                      <div key={strand.id} style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:col.fg, marginBottom:4, textTransform:"uppercase", letterSpacing:0.3 }}>{strand.name}</div>
+                        {subs.map(ss => {
+                          const outcomes = getOutcomes(ss.id);
+                          return (
+                            <div key={ss.id} style={{ marginBottom:6 }}>
+                              <div style={{ fontSize:10, color:COLORS.text3, fontStyle:"italic", marginBottom:3 }}>{ss.name}</div>
+                              {outcomes.map(lo => {
+                                const og = getOutcomeGrade(lo.id, selectedTerm);
+                                return (
+                                  <div key={lo.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"4px 0", borderBottom:`1px solid #f8fafc` }}>
+                                    <span style={{ fontSize:11, color:COLORS.text, flex:1, paddingRight:8, lineHeight:1.4 }}>{lo.name}</span>
+                                    <GradePill grade={og?.grade} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                        {g?.comment && <div style={{ fontSize:10, color:COLORS.text3, fontStyle:"italic", marginTop:4 }}>{g.comment}</div>}
+                      </div>
+                    );
+                  })
+                ) : g ? (
+                  <div>
+                    {child.curriculum === "CBC" ? (
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <GradePill grade={g.grade} size="lg" />
+                        {g.grade && <span style={{ fontSize:11, color:COLORS.text2 }}>{CBC_GRADE_LABELS[g.grade]}</span>}
+                      </div>
+                    ) : isCheckpoint ? (
+                      <div>
+                        <span style={{ fontSize:18, fontWeight:800, color:COLORS.teal2 }}>{g.score || "—"}/50</span>
+                        {g.score && <CheckpointBand score={Number(g.score)} />}
+                      </div>
+                    ) : (
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:18, fontWeight:800, color:COLORS.teal2 }}>{g.grade || "—"}</span>
+                        {g.score && <span style={{ fontSize:12, color:COLORS.text3 }}>{g.score}%</span>}
+                      </div>
+                    )}
+                    {g.comment && <div style={{ fontSize:11, color:COLORS.text3, fontStyle:"italic", marginTop:6 }}>{g.comment}</div>}
+                  </div>
+                ) : (
+                  <div style={{ fontSize:12, color:COLORS.text3, padding:"8px 0" }}>No grades entered yet for {selectedTerm}.</div>
+                )}
+              </div>
             </div>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-              <thead>
-                <tr style={{ background:COLORS.bg }}>
-                  <th style={{ padding:"10px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Subject</th>
-                  {terms.map(t => (
-                    <th key={t} style={{ padding:"10px 14px", textAlign:"center", fontWeight:700, color:t===store.currentTerm?COLORS.teal:COLORS.text2, borderBottom:`1px solid ${COLORS.border}`, background:t===store.currentTerm?COLORS.tealL:"transparent" }}>
-                      {t}
-                      {t === store.currentTerm && <div style={{ fontSize:9, fontWeight:500, color:COLORS.teal }}>Current</div>}
-                    </th>
-                  ))}
-                  <th style={{ padding:"10px 14px", textAlign:"center", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Trend</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subjects.map(sub => {
-                  const termGrades = terms.map(t => getGrade(sub, t));
-                  const gradeOrder = { EE:4, ME:3, AE:2, BE:1 };
-                  const values = termGrades.map(g => g ? (gradeOrder[g.grade] || (g.score ? g.score/25 : 0)) : null).filter(Boolean);
-                  let trend = "—";
-                  let trendColor = COLORS.text3;
-                  if (values.length >= 2) {
-                    const last = values[values.length-1];
-                    const prev = values[values.length-2];
-                    if (last > prev) { trend = "Improving"; trendColor = COLORS.teal; }
-                    else if (last < prev) { trend = "Needs attention"; trendColor = COLORS.coral; }
-                    else { trend = "Steady"; trendColor = COLORS.amber; }
-                  }
-                  return (
-                    <tr key={sub} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
-                      <td style={{ padding:"10px 14px", fontWeight:600 }}>{sub}</td>
-                      {terms.map(t => {
-                        const g = getGrade(sub, t);
-                        return (
-                          <td key={t} style={{ padding:"10px 14px", textAlign:"center", background:t===store.currentTerm?"rgba(204,251,241,0.2)":"transparent" }}>
-                            <GradeBadge g={g} curriculum={child.curriculum} isCP={isCheckpoint} />
-                            {g?.comment && <div style={{ fontSize:10, color:COLORS.text2, fontStyle:"italic", marginTop:2 }}>{g.comment}</div>}
-                          </td>
-                        );
-                      })}
-                      <td style={{ padding:"10px 14px", textAlign:"center" }}>
-                        <span style={{ fontSize:11, fontWeight:600, color:trendColor }}>{trend}</span>
+          );
+        })}
+      </div>
+
+      {/* Term comparison summary */}
+      <div style={{ ...card(), overflow:"auto" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${COLORS.border}` }}>
+          <div style={{ fontWeight:700, fontSize:14 }}>Term Comparison</div>
+          <div style={{ fontSize:12, color:COLORS.text2, marginTop:2 }}>See progress across all three terms</div>
+        </div>
+        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+          <thead>
+            <tr style={{ background:COLORS.bg }}>
+              <th style={{ padding:"9px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>Subject</th>
+              {terms.map(t => (
+                <th key={t} style={{ padding:"9px 14px", textAlign:"center", fontWeight:700, color:t===store.currentTerm?COLORS.teal:COLORS.text2, borderBottom:`1px solid ${COLORS.border}`, background:t===store.currentTerm?"rgba(204,251,241,0.2)":"transparent" }}>
+                  {t}{t===store.currentTerm && <span style={{ fontSize:9, display:"block", color:COLORS.teal }}>Current</span>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {subjects.map(sub => (
+              <tr key={sub} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
+                <td style={{ padding:"9px 14px", fontWeight:600 }}>{sub}</td>
+                {terms.map(t => {
+                  const strands = getStrands(sub, t);
+                  if (strands.length > 0) {
+                    const allOutcomes = strands.flatMap(st => getSubStrands(st.id).flatMap(ss => getOutcomes(ss.id)));
+                    const grades = allOutcomes.map(lo => getOutcomeGrade(lo.id, t)?.grade).filter(Boolean);
+                    const counts = { EE:0, ME:0, AE:0, BE:0 };
+                    grades.forEach(g => { if (counts[g] !== undefined) counts[g]++; });
+                    return (
+                      <td key={t} style={{ padding:"9px 14px", textAlign:"center", background:t===store.currentTerm?"rgba(204,251,241,0.1)":"transparent" }}>
+                        <div style={{ display:"flex", gap:3, justifyContent:"center", flexWrap:"wrap" }}>
+                          {Object.entries(counts).filter(([,v])=>v>0).map(([g,v]) => (
+                            <span key={g} style={{ fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:20, background:g==="EE"?"#ccfbf1":g==="ME"?"#dbeafe":g==="AE"?"#fef3c7":"#fee2e2", color:g==="EE"?"#0f766e":g==="ME"?"#1d4ed8":g==="AE"?"#b45309":"#b91c1c" }}>{g}×{v}</span>
+                          ))}
+                          {grades.length === 0 && <span style={{ color:COLORS.text3 }}>—</span>}
+                        </div>
                       </td>
-                    </tr>
+                    );
+                  }
+                  const g = getGrade(sub, t);
+                  return (
+                    <td key={t} style={{ padding:"9px 14px", textAlign:"center", background:t===store.currentTerm?"rgba(204,251,241,0.1)":"transparent" }}>
+                      {g ? <GradePill grade={g.grade} /> : <span style={{ color:COLORS.text3 }}>—</span>}
+                    </td>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* TERM DETAIL VIEW */}
-      {viewMode === "term" && (
-        <div className="fade-in">
-          <div style={{ display:"flex", gap:6, marginBottom:16 }}>
-            {terms.map(t => (
-              <button key={t} onClick={() => setSelectedTerm(t)} style={{ padding:"7px 16px", borderRadius:8, border:`2px solid ${selectedTerm===t?COLORS.teal:COLORS.border}`, background:selectedTerm===t?COLORS.tealL:"#fff", fontWeight:600, fontSize:13, cursor:"pointer" }}>
-                {t}
-                {t === store.currentTerm && <span style={{ fontSize:10, color:COLORS.teal, marginLeft:4 }}>●</span>}
-              </button>
+              </tr>
             ))}
-          </div>
-
-          {subjects.map(sub => {
-            const g = getGrade(sub, selectedTerm);
-            const strands = getStrands(sub, selectedTerm);
-            const hasStrands = strands.length > 0;
-
-            return (
-              <div key={sub} style={{ ...card(), marginBottom:12, overflow:"hidden" }}>
-                <div style={{ padding:"12px 16px", background:COLORS.bg, borderBottom:`1px solid ${COLORS.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                  <span style={{ fontWeight:700, fontSize:14 }}>{sub}</span>
-                  {!hasStrands && <GradeBadge g={g} curriculum={child.curriculum} isCP={isCheckpoint} />}
-                </div>
-                <div style={{ padding:"12px 16px" }}>
-                  {hasStrands ? (
-                    strands.map(strand => {
-                      const subStrands = getSubStrands(strand.id);
-                      return (
-                        <div key={strand.id} style={{ marginBottom:12 }}>
-                          <div style={{ fontSize:12, fontWeight:700, color:COLORS.teal2, marginBottom:6, padding:"4px 0", borderBottom:`1px solid ${COLORS.border}` }}>{strand.name}</div>
-                          {subStrands.map(ss => {
-                            const outcomes = getOutcomes(ss.id);
-                            return (
-                              <div key={ss.id} style={{ marginBottom:8, paddingLeft:8 }}>
-                                <div style={{ fontSize:11, fontWeight:600, color:COLORS.text2, fontStyle:"italic", marginBottom:4 }}>{ss.name}</div>
-                                {outcomes.map(lo => {
-                                  const og = getOutcomeGrade(lo.id, selectedTerm);
-                                  return (
-                                    <div key={lo.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"4px 8px", borderBottom:`1px solid ${COLORS.border}`, fontSize:12 }}>
-                                      <span style={{ color:COLORS.text, flex:1 }}>{lo.name}</span>
-                                      {og?.grade
-                                        ? <span style={{ fontWeight:800, fontSize:11, color:CBC_GRADE_COLORS[og.grade]||COLORS.text3, background:og.grade==="EE"?COLORS.tealL:og.grade==="ME"?"#dbeafe":og.grade==="AE"?COLORS.amberL:COLORS.coralL, padding:"1px 8px", borderRadius:20 }}>{og.grade}</span>
-                                        : <span style={{ color:COLORS.text3, fontSize:11 }}>—</span>
-                                      }
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div>
-                      {g ? (
-                        <div>
-                          {child.curriculum === "CBC" && g.grade && (
-                            <div style={{ marginBottom:8 }}>
-                              <span style={{ fontSize:12, color:COLORS.text2 }}>Grade: </span>
-                              <span style={{ fontWeight:800, color:CBC_GRADE_COLORS[g.grade] }}>{g.grade}</span>
-                              <span style={{ fontSize:11, color:COLORS.text3, marginLeft:6 }}>{CBC_GRADE_LABELS[g.grade]}</span>
-                            </div>
-                          )}
-                          {g.score && <div style={{ fontSize:12, color:COLORS.text2, marginBottom:4 }}>Score: <strong>{g.score}{isCheckpoint?"/50":"%"}</strong></div>}
-                          {g.comment && <div style={{ fontSize:12, color:COLORS.text2, fontStyle:"italic" }}>{g.comment}</div>}
-                        </div>
-                      ) : (
-                        <div style={{ color:COLORS.text3, fontSize:13 }}>No grades entered yet for {selectedTerm}.</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+
+  function GradePill({ grade, size="sm" }) {
+    if (!grade) return <span style={{ fontSize:size==="sm"?10:12, color:COLORS.text3 }}>—</span>;
+    const colors = { EE:["#ccfbf1","#0f766e"], ME:["#dbeafe","#1d4ed8"], AE:["#fef3c7","#b45309"], BE:["#fee2e2","#b91c1c"] };
+    const [bg, fg] = colors[grade] || ["#f1f5f9","#64748b"];
+    return <span style={{ fontSize:size==="sm"?10:12, fontWeight:800, padding:size==="sm"?"1px 7px":"3px 10px", borderRadius:20, background:bg, color:fg }}>{grade}</span>;
+  }
 }
 
 // ─── REPORT CARD VIEW (Admin) ─────────────────────────────────────────────────
