@@ -131,9 +131,12 @@ export default function App() {
       if (session) {
         const meta = session.user.user_metadata;
         setSession({ userId: session.user.id, role: meta.role, name: meta.name, linkedId: meta.linkedId });
-        loadSchoolData(meta.schoolId || savedSchoolId);
+        await loadSchoolData(meta.schoolId || savedSchoolId);
       } else if (savedSchoolId) {
         await loadSchoolData(savedSchoolId);
+      } else {
+        // No session, no saved school — show login/welcome page
+        setStore(prev => ({ ...prev, setupComplete: false }));
       }
       setLoading(false);
     });
