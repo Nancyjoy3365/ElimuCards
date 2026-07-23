@@ -122,27 +122,40 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
- useEffect(() => {
+  useEffect(() => {
     const savedSchoolId = localStorage.getItem('elimucards_school_id');
 
-    console.log("Saved school ID:", localStorage.getItem('elimucards_school_id'));
-    console.log("Session check starting...");
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
+        // User is logged in — load their school data
         const meta = session.user.user_metadata;
-        setSession({ userId: session.user.id, role: meta.role, name: meta.name, linkedId: meta.linkedId });
+        setSession({
+          userId: session.user.id,
+          role: meta.role,
+          name: meta.name,
+          linkedId: meta.linkedId,
+        });
         await loadSchoolData(meta.schoolId || savedSchoolId);
       } else if (savedSchoolId) {
+        // No session but school was set up before — show login page
         await loadSchoolData(savedSchoolId);
       } else {
-        // No session, no saved school — show login/welcome page
+        // Brand new visitor — show welcome/login page not setup
         setStore(prev => ({ ...prev, setupComplete: false }));
       }
       setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) { setSession(null); setStore(initStore()); }
+      if (!session) {
+        setSession(null);
+        const schoolId = localStorage.getItem('elimucards_school_id');
+        if (schoolId) {
+          setStore(prev => ({ ...prev, setupComplete: true }));
+        } else {
+          setStore(prev => ({ ...prev, setupComplete: false }));
+        }
+      }
     });
 
     return () => listener.subscription.unsubscribe();
@@ -191,22 +204,22 @@ export default function App() {
       teachers: teachers || [],
       parents: parents || [],
       grades: (grades || []).reduce((acc, g) => {
-  if (!acc[g.student_id]) acc[g.student_id] = {};
-  if (!acc[g.student_id][g.subject]) acc[g.student_id][g.subject] = {};
-  acc[g.student_id][g.subject][g.term] = {
-    grade: g.grade_value,
-    score: g.score,
-    comment: g.comment,
-  };
-  return acc;
-}, {}),
+        if (!acc[g.student_id]) acc[g.student_id] = {};
+        if (!acc[g.student_id][g.subject]) acc[g.student_id][g.subject] = {};
+        acc[g.student_id][g.subject][g.term] = {
+          grade: g.grade_value,
+          score: g.score,
+          comment: g.comment,
+        };
+        return acc;
+      }, {}),
       remarks: (remarks || []).reduce((acc, r) => {
-  if (!acc[r.teacher_id]) acc[r.teacher_id] = {};
-  if (!acc[r.teacher_id][r.student_id]) acc[r.teacher_id][r.student_id] = {};
-  acc[r.teacher_id][r.student_id][r.term] = r.remark;
-  return acc;
-}, {}),
-strands: strands || [],
+        if (!acc[r.teacher_id]) acc[r.teacher_id] = {};
+        if (!acc[r.teacher_id][r.student_id]) acc[r.teacher_id][r.student_id] = {};
+        acc[r.teacher_id][r.student_id][r.term] = r.remark;
+        return acc;
+      }, {}),
+      strands: strands || [],
       strandGrades: {},
       subStrands: subStrands || [],
       learningOutcomes: learningOutcomes || [],
@@ -230,7 +243,12 @@ strands: strands || [],
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return error.message;
     const meta = data.user.user_metadata;
-    setSession({ userId: data.user.id, role: meta.role, name: meta.name, linkedId: meta.linkedId });
+    setSession({
+      userId: data.user.id,
+      role: meta.role,
+      name: meta.name,
+      linkedId: meta.linkedId,
+    });
     await loadSchoolData(meta.schoolId);
     return null;
   }
@@ -242,12 +260,12 @@ strands: strands || [],
     if (schoolId) {
       setStore(prev => ({ ...prev, setupComplete: true }));
     } else {
-      setStore(initStore());
+      setStore(prev => ({ ...prev, setupComplete: false }));
     }
   }
 
   if (loading) return (
-    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Sora, sans-serif", color:"#0d9488" }}>
+    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Plus Jakarta Sans, sans-serif", color:COLORS.teal }}>
       <div style={{ textAlign:"center" }}>
         <div style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>ElimuCards</div>
         <div style={{ fontSize:14, opacity:.6 }}>Loading...</div>
@@ -255,8 +273,26 @@ strands: strands || [],
     </div>
   );
 
-  if (!store.setupComplete) return <SetupWizard store={store} updateStore={updateStore} supabase={supabase} />;
-  if (!session) return <LoginPage store={store} onLogin={login} />;
+  // Scenarios:
+  // 1. No school set up at all — new visitor — show welcome/login (setupComplete=false, no savedSchoolId)
+  // 2. School exists, no session — show login page
+  // 3. School exists, session active — show dashboard
+  // 4. Brand new school signup — show setup wizard only after clicking "Create New School"
+
+  const savedSchoolId = localStorage.getItem('elimucards_school_id');
+
+  if (!store.setupComplete && !savedSchoolId) {
+    // New visitor — show login/welcome with option to create account
+    return <LoginPage store={store} onLogin={login} onSetup={() => updateStore({ setupComplete: "wizard" })} supabase={supabase} />;
+  }
+
+  if (store.setupComplete === "wizard") {
+    return <SetupWizard store={store} updateStore={updateStore} supabase={supabase} />;
+  }
+
+  if (!session) {
+    return <LoginPage store={store} onLogin={login} onSetup={() => updateStore({ setupComplete: "wizard" })} supabase={supabase} />;
+  }
 
   const props = { store, updateStore, session, logout, supabase };
   if (session.role === "admin") return <AdminApp {...props} />;
@@ -676,7 +712,7 @@ function SubjectEditor({ cls, onToggle, onAdd }) {
 
 // ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 
-function LoginPage({ store, onLogin }) {
+function LoginPage({ store, onLogin, onSetup, supabase }) {
   const [mode, setMode] = useState("choose"); // choose | login | signup
   const [role, setRole] = useState(null);
   const [email, setEmail] = useState("");
@@ -724,7 +760,7 @@ function LoginPage({ store, onLogin }) {
                 <button onClick={() => setMode("login")} style={{ ...btn("primary"), width:"100%", justifyContent:"center", padding:"12px" }}>
                   Sign In to Existing Account
                 </button>
-                <button onClick={() => setMode("signup")} style={{ ...btn("ghost"), width:"100%", justifyContent:"center", padding:"12px" }}>
+                <button onClick={() => { if (onSetup) onSetup(); else setMode("signup"); }} style={{ ...btn("ghost"), width:"100%", justifyContent:"center", padding:"12px" }}>
                   Create New School Account
                 </button>
               </div>
