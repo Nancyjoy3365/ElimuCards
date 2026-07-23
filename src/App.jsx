@@ -112,6 +112,7 @@ function initStore() {
     currentYear: new Date().getFullYear(),
     activeCurriculum: "CBC",
     setupComplete: false,
+    examConfig: ["Mid Term", "End Term"],
   };
 }
 
@@ -199,6 +200,7 @@ export default function App() {
       currentYear: school?.current_year || new Date().getFullYear(),
       activeCurriculum: school?.active_curriculum || "CBC",
       setupComplete: school?.setup_complete || false,
+      examConfig: school?.exam_config || ["Mid Term", "End Term"],
       classes: classes || [],
       students: students || [],
       teachers: teachers || [],
@@ -870,7 +872,7 @@ function AdminApp({ store, updateStore, session, logout }) {
           {page === "parents" && <ParentsManager store={store} updateStore={updateStore} supabase={supabase} />}
           {page === "grades"     && <AdminGrades store={store} updateStore={updateStore} />}
           {page === "strands" && <StrandsManager store={store} updateStore={updateStore} supabase={supabase} />}
-          {page === "settings"   && <AdminSettings store={store} updateStore={updateStore} />}
+          {page === "settings" && <AdminSettings store={store} updateStore={updateStore} supabase={supabase} />}
        </main>
       </div>
     </div>
@@ -1768,10 +1770,24 @@ function AdminGrades({ store, updateStore }) {
 
 // ─── ADMIN SETTINGS ───────────────────────────────────────────────────────────
 
-function AdminSettings({ store, updateStore }) {
-  const [form, setForm] = useState({ schoolName:store.schoolName, currentTerm:store.currentTerm, currentYear:store.currentYear });
+function AdminSettings({ store, updateStore, supabase }) {
+  const [form, setForm] = useState({ 
+  schoolName:store.schoolName, 
+  currentTerm:store.currentTerm, 
+  currentYear:store.currentYear,
+  examConfig: store.examConfig || ["Mid Term", "End Term"],
+});
 
-  function save() { updateStore({ schoolName:form.schoolName, currentTerm:form.currentTerm, currentYear:Number(form.currentYear) }); alert("Settings saved!"); }
+  async function save() { 
+  updateStore({ schoolName:form.schoolName, currentTerm:form.currentTerm, currentYear:Number(form.currentYear), examConfig:form.examConfig });
+  await supabase.from('schools').update({ 
+    name:form.schoolName, 
+    current_term:form.currentTerm, 
+    current_year:Number(form.currentYear),
+    exam_config: form.examConfig,
+  }).eq('id', store.schoolId);
+  alert("Settings saved!"); 
+}
 
   function resetAll() {
     if (!confirm("This will erase ALL school data and reset to setup. Are you sure?")) return;
@@ -1791,6 +1807,26 @@ function AdminSettings({ store, updateStore }) {
           <strong>CBC:</strong> Term 1: Jan–Apr · Term 2: May–Jul · Term 3: Aug–Nov<br/>
           <strong>Cambridge:</strong> Term 1: Sep–Dec · Term 2: Jan–Mar · Term 3: Apr–Jun
         </div>
+        <FormGroup label="Cambridge Exam Structure">
+  <div style={{ fontSize:12, color:COLORS.text2, marginBottom:8 }}>Select which exams teachers enter grades for each term:</div>
+  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+    {["Entry Exam", "Mid Term", "End Term"].map(exam => (
+      <label key={exam} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderRadius:8, border:`1.5px solid ${form.examConfig?.includes(exam)?COLORS.teal:COLORS.border}`, background:form.examConfig?.includes(exam)?COLORS.tealL:"#fff", cursor:"pointer", fontSize:13, fontWeight:500 }}>
+        <input type="checkbox" 
+          checked={form.examConfig?.includes(exam) || false}
+          onChange={() => setForm(f => ({
+            ...f,
+            examConfig: f.examConfig?.includes(exam)
+              ? f.examConfig.filter(e => e !== exam)
+              : [...(f.examConfig || []), exam]
+          }))}
+          style={{ accentColor:COLORS.teal }} />
+        {exam}
+        {exam === "End Term" && <span style={{ fontSize:11, color:COLORS.text3, marginLeft:4 }}>(always shown on report card)</span>}
+      </label>
+    ))}
+  </div>
+</FormGroup>
         <button style={{ ...btn("primary"), marginTop:16 }} onClick={save}>Save Changes</button>
       </div>
       <div style={{ ...card(), padding:"20px 24px", borderColor:COLORS.coral }}>
@@ -2229,6 +2265,82 @@ const teacher = teacherRaw ? {
   );
 }
 
+function CambridgeExamEntry({ store, student, subject, term, isCheckpoint, examConfig, onGrade }) {
+  const [activeExam, setActiveExam] = useState(examConfig[examConfig.length - 1] || "End Term");
+
+  const examKey = `${term}__${activeExam}`;
+  const gradeData = store.grades?.[student.id]?.[subject]?.[examKey] || {};
+
+  return (
+    <div style={{ ...card(), padding:"16px 20px", marginBottom:14 }}>
+      {/* Exam tabs */}
+      <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
+        {examConfig.map(exam => (
+          <button key={exam} onClick={() => setActiveExam(exam)}
+            style={{ padding:"6px 14px", borderRadius:6, border:"none", fontWeight:600, fontSize:12, cursor:"pointer", background:activeExam===exam?COLORS.teal:"transparent", color:activeExam===exam?"#fff":COLORS.text2, transition:"all 0.15s" }}>
+            {exam}
+            {exam === "End Term" && <span style={{ fontSize:9, display:"block", opacity:.7 }}>Official</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Exam grade entry */}
+      {isCheckpoint ? (
+        <div>
+          <div style={{ fontSize:13, fontWeight:600, marginBottom:10, color:COLORS.text2 }}>Checkpoint Score (0–50) — {activeExam}</div>
+          <input style={{ ...input(), maxWidth:120, fontSize:20, fontWeight:800, textAlign:"center" }}
+            type="number" min="0" max="50" placeholder="0–50"
+            value={gradeData.score || ""}
+            onChange={e => onGrade(student.id, subject, examKey, "score", e.target.value)} />
+          {gradeData.score && <CheckpointBand score={Number(gradeData.score)} />}
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+          <div>
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:8, color:COLORS.text2 }}>Score (%) — {activeExam}</div>
+            <input style={{ ...input(), fontSize:20, fontWeight:800, textAlign:"center" }}
+              type="number" min="0" max="100" placeholder="%"
+              value={gradeData.score || ""}
+              onChange={e => onGrade(student.id, subject, examKey, "score", e.target.value)} />
+          </div>
+          <div>
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:8, color:COLORS.text2 }}>Letter Grade</div>
+            <div style={{ display:"flex", gap:6 }}>
+              {CAM_LETTER_GRADES.map(g => (
+                <button key={g} onClick={() => onGrade(student.id, subject, examKey, "grade", g)}
+                  style={{ flex:1, padding:"10px 0", borderRadius:8, border:`2px solid ${gradeData.grade===g?COLORS.teal:COLORS.border}`, background:gradeData.grade===g?COLORS.teal:"#fff", color:gradeData.grade===g?"#fff":COLORS.text2, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary of all exams */}
+      {examConfig.length > 1 && (
+        <div style={{ marginTop:14, padding:"10px 14px", background:COLORS.bg, borderRadius:8, border:`1px solid ${COLORS.border}` }}>
+          <div style={{ fontSize:11, fontWeight:700, color:COLORS.text2, marginBottom:8 }}>All Exams This Term</div>
+          <div style={{ display:"flex", gap:12 }}>
+            {examConfig.map(exam => {
+              const ek = `${term}__${exam}`;
+              const gd = store.grades?.[student.id]?.[subject]?.[ek] || {};
+              return (
+                <div key={exam} style={{ textAlign:"center" }}>
+                  <div style={{ fontSize:10, color:COLORS.text3, marginBottom:3 }}>{exam}</div>
+                  <div style={{ fontWeight:800, fontSize:16, color:gd.score||gd.grade?COLORS.teal:COLORS.text3 }}>
+                    {gd.grade || (gd.score ? `${gd.score}%` : "—")}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Teacher Grade Entry
 function TeacherGradeEntry({ store, updateStore, teacher, supabase }) {
   const [selectedAssign, setSelectedAssign] = useState(null);
@@ -2482,43 +2594,15 @@ function TeacherGradeEntry({ store, updateStore, teacher, supabase }) {
 
               {/* Cambridge */}
               {teacher.curriculum === "Cambridge" && (
-                <div style={{ ...card(), padding:"16px 20px", marginBottom:14 }}>
-                  {isCheckpoint ? (
-                    <div>
-                      <div style={{ fontSize:13, fontWeight:600, marginBottom:10, color:COLORS.text2 }}>Checkpoint Score (0–50)</div>
-                      <input style={{ ...input(), maxWidth:120, fontSize:20, fontWeight:800, textAlign:"center" }}
-                        type="number" min="0" max="50" placeholder="0–50"
-                        value={store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.score || ""}
-                        onChange={e => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "score", e.target.value)} />
-                      {store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.score &&
-                        <CheckpointBand score={Number(store.grades[currentStudent.id][selectedAssign.subject][term].score)} />}
-                    </div>
-                  ) : (
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-                      <div>
-                        <div style={{ fontSize:13, fontWeight:600, marginBottom:8, color:COLORS.text2 }}>Score (%)</div>
-                        <input style={{ ...input(), fontSize:20, fontWeight:800, textAlign:"center" }}
-                          type="number" min="0" max="100" placeholder="%"
-                          value={store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.score || ""}
-                          onChange={e => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "score", e.target.value)} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize:13, fontWeight:600, marginBottom:8, color:COLORS.text2 }}>Letter Grade</div>
-                        <div style={{ display:"flex", gap:6 }}>
-                          {CAM_LETTER_GRADES.map(g => {
-                            const current = store.grades?.[currentStudent.id]?.[selectedAssign.subject]?.[term]?.grade || "";
-                            return (
-                              <button key={g} onClick={() => setGradeForStudent(currentStudent.id, selectedAssign.subject, term, "grade", g)}
-                                style={{ flex:1, padding:"10px 0", borderRadius:8, border:`2px solid ${current===g ? COLORS.teal : COLORS.border}`, background:current===g ? COLORS.teal : "#fff", color:current===g ? "#fff" : COLORS.text2, fontSize:14, fontWeight:800, cursor:"pointer" }}>
-                                {g}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <CambridgeExamEntry
+                  store={store}
+                  student={currentStudent}
+                  subject={selectedAssign.subject}
+                  term={term}
+                  isCheckpoint={isCheckpoint}
+                  examConfig={store.examConfig || ["Mid Term", "End Term"]}
+                  onGrade={setGradeForStudent}
+                />
               )}
 
               {/* Save & Next / Previous navigation */}
