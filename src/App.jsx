@@ -126,15 +126,22 @@ export default function App() {
 
   useEffect(() => {
     // Handle password reset redirect
-    const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-    const accessToken = hashParams.get('access_token');
-    const type = hashParams.get('type');
-    if (accessToken && type === 'recovery') {
-      supabase.auth.setSession({ access_token: accessToken, refresh_token: hashParams.get('refresh_token') || '' });
+const hash = window.location.hash;
+if (hash && hash.includes('type=recovery')) {
+  const hashParams = new URLSearchParams(hash.substring(1));
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
+  if (accessToken) {
+    supabase.auth.setSession({ 
+      access_token: accessToken, 
+      refresh_token: refreshToken || ''
+    }).then(() => {
       setShowPasswordReset(true);
       setLoading(false);
-      return;
+    });
+    return;
   }
+}
     const savedSchoolId = localStorage.getItem('elimucards_school_id');
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -780,7 +787,6 @@ function LoginPage({ store, onLogin, onSetup, supabase }) {
   const [showForgot, setShowForgot] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetMsg, setResetMsg] = useState("");
-  const [success, setSuccess] = useState("");
 
   async function handleLogin() {
     setError(""); setLoading(true);
