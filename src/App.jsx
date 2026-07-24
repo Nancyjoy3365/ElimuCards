@@ -125,28 +125,31 @@ export default function App() {
   const [showPasswordReset, setShowPasswordReset] = useState(false);
 
   useEffect(() => {
-    // Handle password reset redirect
-const hash = window.location.hash;
-if (hash && hash.includes('type=recovery')) {
-  const hashParams = new URLSearchParams(hash.substring(1));
-  const accessToken = hashParams.get('access_token');
-  const refreshToken = hashParams.get('refresh_token');
-  if (accessToken) {
-    supabase.auth.setSession({ 
-      access_token: accessToken, 
-      refresh_token: refreshToken || ''
-    }).then(() => {
-      setShowPasswordReset(true);
-      setLoading(false);
-    });
-    return;
-  }
-}
+    // FIRST — check if this is a password reset redirect
+    const hash = window.location.hash;
+    if (hash && hash.includes('type=recovery')) {
+      const hashParams = new URLSearchParams(hash.substring(1));
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      if (accessToken) {
+        supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken || ''
+        }).then(() => {
+          setShowPasswordReset(true);
+          setLoading(false);
+          // Clear the hash from URL so refresh doesn't trigger reset again
+          window.history.replaceState(null, '', window.location.pathname);
+        });
+        return;
+      }
+    }
+
+    // SECOND — normal session check
     const savedSchoolId = localStorage.getItem('elimucards_school_id');
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
-        // User is logged in — load their school data
         const meta = session.user.user_metadata;
         setSession({
           userId: session.user.id,
@@ -156,10 +159,8 @@ if (hash && hash.includes('type=recovery')) {
         });
         await loadSchoolData(meta.schoolId || savedSchoolId);
       } else if (savedSchoolId) {
-        // No session but school was set up before — show login page
         await loadSchoolData(savedSchoolId);
       } else {
-        // Brand new visitor — show welcome/login page not setup
         setStore(prev => ({ ...prev, setupComplete: false }));
       }
       setLoading(false);
