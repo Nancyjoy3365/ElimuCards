@@ -2252,7 +2252,7 @@ const teacher = teacherRaw ? {
   return (
     <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column" }}>
       <StyleTag />
-      <TopBar store={store} session={session} logout={logout} onCurriculumSwitch={switchCurriculum} />
+      <TopBar store={store} session={session} logout={logout} />
       <div style={{ display:"flex", flex:1 }}>
         <Sidebar items={sidebarItems} active={page} onSelect={setPage} />
         <main style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)" }}>
@@ -3014,15 +3014,39 @@ function ParentChildView({ store, child }) {
                         <GradePill grade={g.grade} size="lg" />
                         {g.grade && <span style={{ fontSize:11, color:COLORS.text2 }}>{CBC_GRADE_LABELS[g.grade]}</span>}
                       </div>
-                    ) : isCheckpoint ? (
+                    } : isCheckpoint ? (
                       <div>
-                        <span style={{ fontSize:18, fontWeight:800, color:COLORS.teal2 }}>{g.score || "—"}/50</span>
-                        {g.score && <CheckpointBand score={Number(g.score)} />}
+                        {(store.examConfig || ["Mid Term","End Term"]).map(exam => {
+                          const ek = `${selectedTerm}__${exam}`;
+                          const eg = store.grades?.[child.id]?.[sub]?.[ek];
+                          return (
+                            <div key={exam} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"3px 0", borderBottom:`1px solid ${COLORS.border}` }}>
+                              <span style={{ fontSize:11, color:COLORS.text2 }}>{exam}</span>
+                              <span style={{ fontWeight:800, fontSize:12, color:eg?.score?COLORS.teal2:COLORS.text3 }}>
+                                {eg?.score ? `${eg.score}/50` : "—"}
+                                {eg?.score && <CheckpointBand score={Number(eg.score)} />}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ fontSize:18, fontWeight:800, color:COLORS.teal2 }}>{g.grade || "—"}</span>
-                        {g.score && <span style={{ fontSize:12, color:COLORS.text3 }}>{g.score}%</span>}
+                      <div>
+                        {(store.examConfig || ["Mid Term","End Term"]).map(exam => {
+                          const ek = `${selectedTerm}__${exam}`;
+                          const eg = store.grades?.[child.id]?.[sub]?.[ek];
+                          const isEndTerm = exam === "End Term";
+                          return (
+                            <div key={exam} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"4px 0", borderBottom:`1px solid ${COLORS.border}`, background:isEndTerm?"rgba(204,251,241,0.2)":"transparent" }}>
+                              <span style={{ fontSize:11, color:COLORS.text2, fontWeight:isEndTerm?700:400 }}>{exam}{isEndTerm && " ★"}</span>
+                              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                {eg?.grade && <span style={{ fontWeight:800, fontSize:12, color:COLORS.teal2 }}>{eg.grade}</span>}
+                                {eg?.score && <span style={{ fontSize:11, color:COLORS.text3 }}>{eg.score}%</span>}
+                                {!eg?.grade && !eg?.score && <span style={{ fontSize:11, color:COLORS.text3 }}>—</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                     {g.comment && <div style={{ fontSize:11, color:COLORS.text3, fontStyle:"italic", marginTop:6 }}>{g.comment}</div>}
