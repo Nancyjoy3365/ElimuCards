@@ -122,8 +122,19 @@ export default function App() {
   const [store, setStore] = useState(initStore);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
 
   useEffect(() => {
+    // Handle password reset redirect
+    const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+    const accessToken = hashParams.get('access_token');
+    const type = hashParams.get('type');
+    if (accessToken && type === 'recovery') {
+      supabase.auth.setSession({ access_token: accessToken, refresh_token: hashParams.get('refresh_token') || '' });
+      setShowPasswordReset(true);
+      setLoading(false);
+      return;
+  }
     const savedSchoolId = localStorage.getItem('elimucards_school_id');
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -265,6 +276,8 @@ export default function App() {
       setStore(prev => ({ ...prev, setupComplete: false }));
     }
   }
+
+  if (showPasswordReset) return <PasswordResetPage supabase={supabase} onDone={() => setShowPasswordReset(false)} />;
 
   if (loading) return (
     <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Plus Jakarta Sans, sans-serif", color:COLORS.teal }}>
@@ -712,6 +725,47 @@ function SubjectEditor({ cls, onToggle, onAdd }) {
   );
 }
 
+function PasswordResetPage({ supabase, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleReset() {
+    if (!password || password !== confirm) { setError("Passwords don't match."); return; }
+    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) { setError(error.message); setLoading(false); return; }
+    setSuccess("Password updated successfully!");
+    setTimeout(() => onDone(), 2000);
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", background:`linear-gradient(135deg, ${COLORS.teal3} 0%, #1a5276 100%)`, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <StyleTag />
+      <div style={{ ...card(), padding:0, width:"100%", maxWidth:440, overflow:"hidden" }}>
+        <div style={{ background:`linear-gradient(135deg,${COLORS.teal},${COLORS.teal2})`, padding:"28px 32px", color:"#fff", textAlign:"center" }}>
+          <div style={{ fontFamily:"Plus Jakarta Sans, sans-serif", fontSize:28, fontWeight:800 }}>ElimuCards</div>
+          <div style={{ marginTop:4, fontSize:14, opacity:.8 }}>Set New Password</div>
+        </div>
+        <div style={{ padding:"28px 32px" }}>
+          <p style={{ color:COLORS.text2, fontSize:13, marginBottom:20 }}>Enter your new password below.</p>
+          <Input label="New Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+          <Input label="Confirm Password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+          {error && <div style={{ color:COLORS.coral, fontSize:13, marginBottom:12 }}>⚠ {error}</div>}
+          {success && <div style={{ color:COLORS.teal, fontSize:13, marginBottom:12, background:COLORS.tealL, padding:"8px 12px", borderRadius:7 }}>✓ {success}</div>}
+          <button onClick={handleReset} disabled={loading} style={{ ...btn("primary"), width:"100%", justifyContent:"center", opacity:loading?0.6:1 }}>
+            {loading ? "Updating..." : "Update Password →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 
 function LoginPage({ store, onLogin, onSetup, supabase }) {
@@ -723,6 +777,10 @@ function LoginPage({ store, onLogin, onSetup, supabase }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetMsg, setResetMsg] = useState("");
+  const [success, setSuccess] = useState("");
 
   async function handleLogin() {
     setError(""); setLoading(true);
@@ -742,6 +800,20 @@ function LoginPage({ store, onLogin, onSetup, supabase }) {
     setSuccess("Account created! Check your email to confirm, then sign in.");
     setLoading(false);
   }
+
+  async function handleReset() {
+  if (!resetEmail) return;
+  setLoading(true);
+  const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+    redirectTo: window.location.origin + '/?reset=true',
+  });
+  if (error) {
+    setError(error.message);
+  } else {
+    setResetMsg("Reset link sent! Check your email and click the link to set a new password.");
+  }
+  setLoading(false);
+}
 
   return (
     <div style={{ minHeight:"100vh", background:`linear-gradient(135deg, ${COLORS.teal3} 0%, #1a5276 100%)`, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
@@ -799,11 +871,30 @@ function LoginPage({ store, onLogin, onSetup, supabase }) {
                   <button onClick={() => { setRole(null); setError(""); }} style={{ ...btn("ghost", { fontSize:13, padding:"5px 10px", marginBottom:16 }) }}>← Back</button>
                   <h2 style={{ marginBottom:20, fontSize:18 }}>Sign In as {role.charAt(0).toUpperCase()+role.slice(1)}</h2>
                   <Input label="Email Address" type="email" value={email} onChange={e => setEmail(e.target.value)} />
-                  <Input label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
-                  {error && <div style={{ color:COLORS.coral, fontSize:13, marginBottom:12 }}>⚠ {error}</div>}
-                  <button onClick={handleLogin} disabled={loading} style={{ ...btn("primary"), width:"100%", justifyContent:"center", opacity:loading?0.6:1 }}>
-                    {loading ? "Signing in..." : "Sign In →"}
-                  </button>
+<Input label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+{error && <div style={{ color:COLORS.coral, fontSize:13, marginBottom:12 }}>⚠ {error}</div>}
+{success && <div style={{ color:COLORS.teal, fontSize:13, marginBottom:12, background:COLORS.tealL, padding:"8px 12px", borderRadius:7 }}>✓ {success}</div>}
+<button onClick={handleLogin} disabled={loading} style={{ ...btn("primary"), width:"100%", justifyContent:"center", opacity:loading?0.6:1 }}>
+  {loading ? "Signing in..." : "Sign In →"}
+</button>
+<button onClick={() => setShowForgot(true)} style={{ background:"none", border:"none", color:COLORS.teal, fontSize:12, cursor:"pointer", marginTop:8, textDecoration:"underline" }}>
+  Forgot password?
+</button>
+
+{showForgot && (
+  <div style={{ marginTop:14, padding:"14px", background:COLORS.bg, borderRadius:8, border:`1px solid ${COLORS.border}` }}>
+    <div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>Reset Password</div>
+    <div style={{ fontSize:12, color:COLORS.text2, marginBottom:10 }}>Enter your email and we'll send you a reset link.</div>
+    <Input label="Email Address" type="email" value={resetEmail} onChange={e => setResetEmail(e.target.value)} />
+    {resetMsg && <div style={{ color:COLORS.teal, fontSize:12, marginBottom:8 }}>{resetMsg}</div>}
+    <div style={{ display:"flex", gap:8 }}>
+      <button onClick={handleReset} disabled={loading} style={{ ...btn("primary"), fontSize:12, opacity:loading?0.6:1 }}>
+        {loading ? "Sending..." : "Send Reset Link"}
+      </button>
+      <button onClick={() => setShowForgot(false)} style={btn("ghost", { fontSize:12 })}>Cancel</button>
+    </div>
+  </div>
+)}
                 </div>
               )}
             </div>
@@ -3014,7 +3105,7 @@ function ParentChildView({ store, child }) {
                         <GradePill grade={g.grade} size="lg" />
                         {g.grade && <span style={{ fontSize:11, color:COLORS.text2 }}>{CBC_GRADE_LABELS[g.grade]}</span>}
                       </div>
-                    } : isCheckpoint ? (
+                    ) : isCheckpoint ? (
                       <div>
                         {(store.examConfig || ["Mid Term","End Term"]).map(exam => {
                           const ek = `${selectedTerm}__${exam}`;
