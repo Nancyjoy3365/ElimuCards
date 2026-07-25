@@ -477,42 +477,58 @@ function TopBar({ store, session, logout, onCurriculumSwitch }) {
 }
 
 function Sidebar({ items, active, onSelect }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   return (
     <>
-      {/* Desktop sidebar */}
       <style>{`
         @media (max-width: 768px) {
           #desktop-sidebar { display: none !important; }
-          #mobile-bottom-nav { display: flex !important; }
-          #app-main { padding: 12px !important; padding-bottom: 80px !important; }
-          .top-bar-school { font-size: 14px !important; }
+          #mobile-fab { display: flex !important; }
+          #app-main { padding: 12px !important; padding-bottom: 20px !important; }
         }
         @media (min-width: 769px) {
-          #mobile-bottom-nav { display: none !important; }
+          #mobile-fab { display: none !important; }
+          #mobile-drawer { display: none !important; }
+          #mobile-overlay { display: none !important; }
         }
       `}</style>
 
+      {/* Desktop sidebar */}
       <nav id="desktop-sidebar" style={{ width:220, flexShrink:0, background:"#fff", borderRight:`1px solid ${COLORS.border}`, padding:"16px 10px", display:"flex", flexDirection:"column", gap:2, minHeight:"calc(100vh - 60px)" }}>
         {items.map(item => (
           <button key={item.id} onClick={() => onSelect(item.id)}
-            style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", transition:"all 0.15s", cursor:"pointer" }}>
+            style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", transition:"all 0.15s", cursor:"pointer", width:"100%" }}>
             {item.label}
           </button>
         ))}
       </nav>
 
-      {/* Mobile bottom navigation */}
-      <nav id="mobile-bottom-nav" style={{ display:"none", position:"fixed", bottom:0, left:0, right:0, background:"#fff", borderTop:`1px solid ${COLORS.border}`, zIndex:1000, padding:"6px 0 8px", boxShadow:"0 -2px 12px rgba(0,0,0,0.08)", overflowX:"auto", whiteSpace:"nowrap" }}>
-        <div style={{ display:"flex", justifyContent:"space-around", minWidth:"100%", padding:"0 8px" }}>
+      {/* Mobile floating menu button */}
+      <button id="mobile-fab" onClick={() => setMobileOpen(o => !o)}
+        style={{ display:"none", position:"fixed", bottom:24, right:24, zIndex:1200, width:52, height:52, borderRadius:"50%", background:COLORS.teal, color:"#fff", border:"none", fontSize:24, cursor:"pointer", boxShadow:"0 4px 16px rgba(13,148,136,0.4)", alignItems:"center", justifyContent:"center" }}>
+        {mobileOpen ? "✕" : "☰"}
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div id="mobile-overlay" onClick={() => setMobileOpen(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1100 }} />
+      )}
+
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div id="mobile-drawer" className="fade-in"
+          style={{ position:"fixed", bottom:90, right:24, zIndex:1150, background:"#fff", borderRadius:14, padding:"10px 8px", boxShadow:"0 8px 32px rgba(0,0,0,0.18)", minWidth:200, border:`1px solid ${COLORS.border}` }}>
           {items.map(item => (
-            <button key={item.id} onClick={() => onSelect(item.id)}
-              style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:"4px 8px", borderRadius:8, border:"none", background:"transparent", color:active===item.id?COLORS.teal:COLORS.text3, fontWeight:active===item.id?700:400, fontSize:10, cursor:"pointer", flex:1, minWidth:0 }}>
-              <div style={{ width:6, height:6, borderRadius:"50%", background:active===item.id?COLORS.teal:"transparent", marginBottom:2 }} />
-              <span style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:"100%" }}>{item.label}</span>
+            <button key={item.id} onClick={() => { onSelect(item.id); setMobileOpen(false); }}
+              style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", cursor:"pointer", width:"100%", transition:"all 0.15s" }}>
+              {active===item.id && <span style={{ width:6, height:6, borderRadius:"50%", background:COLORS.teal, flexShrink:0 }} />}
+              {item.label}
             </button>
           ))}
         </div>
-      </nav>
+      )}
     </>
   );
 }
@@ -1263,8 +1279,9 @@ function StudentsManager({ store, updateStore, supabase }) {
     setForm({ name:"", admNo:"", gender:"", curriculum:activeCurTab, grade:"", stream:"" });
   }
 
-  function deleteStudent(id) {
+  async function deleteStudent(id) {
     if (!confirm("Remove this student?")) return;
+    await supabase.from('students').delete().eq('id', id);
     updateStore(s => ({ ...s, students: s.students.filter(st => st.id !== id) }));
   }
   const [editStudent, setEditStudent] = useState(null);
@@ -1474,9 +1491,10 @@ function TeachersManager({ store, updateStore, supabase }) {
     setShowModal(false);
   }
 
-  function deleteTeacher(id) {
+  async function deleteTeacher(id) {
     if (!confirm("Remove this teacher?")) return;
-    updateStore(s => ({ ...s, teachers:s.teachers.filter(t=>t.id!==id), users:s.users.filter(u=>u.linkedId!==id) }));
+    await supabase.from('teachers').delete().eq('id', id);
+    updateStore(s => ({ ...s, teachers:s.teachers.filter(t=>t.id!==id) }));
   }
 
 function openEditTeacher(teacher) {
@@ -1715,11 +1733,11 @@ function ParentsManager({ store, updateStore, supabase }) {
     setForm({ name:"", email:"", phone:"", password:"", childIds:[] });
   }
 
-  function deleteParent(id) {
+  async function deleteParent(id) {
     if (!confirm("Remove this parent?")) return;
-    updateStore(s => ({ ...s, parents:s.parents.filter(p=>p.id!==id), users:s.users.filter(u=>u.linkedId!==id) }));
+    await supabase.from('parents').delete().eq('id', id);
+    updateStore(s => ({ ...s, parents:s.parents.filter(p=>p.id!==id) }));
   }
-  
 
 function openEditParent(parent) {
   setEditParent({
