@@ -451,11 +451,11 @@ function TopBar({ store, session, logout, onCurriculumSwitch }) {
   const dual = store.curricula.length > 1;
   return (
     <header style={{ background:"#fff", borderBottom:`1px solid ${COLORS.border}`, padding:"0 24px", height:60, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:900, boxShadow:"0 1px 6px rgba(0,0,0,0.05)" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-        <div style={{ width:36, height:36, borderRadius:8, background:`linear-gradient(135deg,${COLORS.teal},${COLORS.teal3})`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:800, fontFamily:"Sora", fontSize:16 }}>E</div>
-        <div>
-          <div style={{ fontFamily:"Sora", fontWeight:700, fontSize:17, color:COLORS.teal3, lineHeight:1.1 }}>{store.schoolName || "School"}</div>
-          <div style={{ fontSize:11, color:COLORS.text3, fontWeight:500 }}>ElimuCards</div>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ width:34, height:34, borderRadius:8, background:`linear-gradient(135deg,${COLORS.teal},${COLORS.teal3})`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:800, fontSize:15, flexShrink:0 }}>E</div>
+        <div style={{ minWidth:0 }}>
+          <div className="top-bar-school" style={{ fontWeight:700, fontSize:16, color:COLORS.teal3, lineHeight:1.1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"30vw" }}>{store.schoolName || "School"}</div>
+          <div style={{ fontSize:10, color:COLORS.text3 }}>ElimuCards</div>
         </div>
       </div>
       <div style={{ display:"flex", alignItems:"center", gap:12 }}>
@@ -477,51 +477,41 @@ function TopBar({ store, session, logout, onCurriculumSwitch }) {
 }
 
 function Sidebar({ items, active, onSelect }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const isMobile = window.innerWidth < 768;
-
   return (
     <>
-      {/* Mobile toggle button */}
-      <button
-        onClick={() => setMobileOpen(o => !o)}
-        style={{ display:"none", position:"fixed", bottom:20, right:20, zIndex:1100, width:48, height:48, borderRadius:"50%", background:COLORS.teal, color:"#fff", border:"none", fontSize:22, cursor:"pointer", boxShadow:"0 4px 12px rgba(13,148,136,0.4)", alignItems:"center", justifyContent:"center",
-          ...(typeof window !== 'undefined' && window.innerWidth < 768 ? { display:"flex" } : {})
-        }}
-        id="mobile-sidebar-toggle">
-        {mobileOpen ? "✕" : "☰"}
-      </button>
-
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div onClick={() => setMobileOpen(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:1050, display: typeof window !== 'undefined' && window.innerWidth < 768 ? "block" : "none" }} />
-      )}
-
+      {/* Desktop sidebar */}
       <style>{`
         @media (max-width: 768px) {
-          #mobile-sidebar-toggle { display: flex !important; }
-          #app-sidebar {
-            position: fixed !important;
-            left: ${mobileOpen ? '0' : '-240px'} !important;
-            top: 60px !important;
-            height: calc(100vh - 60px) !important;
-            z-index: 1060 !important;
-            transition: left 0.25s ease !important;
-            box-shadow: 4px 0 20px rgba(0,0,0,0.15) !important;
-          }
-          #app-main {
-            margin-left: 0 !important;
-          }
+          #desktop-sidebar { display: none !important; }
+          #mobile-bottom-nav { display: flex !important; }
+          #app-main { padding: 12px !important; padding-bottom: 80px !important; }
+          .top-bar-school { font-size: 14px !important; }
+        }
+        @media (min-width: 769px) {
+          #mobile-bottom-nav { display: none !important; }
         }
       `}</style>
 
-      <nav id="app-sidebar" style={{ width:220, flexShrink:0, background:"#fff", borderRight:`1px solid ${COLORS.border}`, padding:"16px 10px", display:"flex", flexDirection:"column", gap:2, minHeight:"calc(100vh - 60px)" }}>
+      <nav id="desktop-sidebar" style={{ width:220, flexShrink:0, background:"#fff", borderRight:`1px solid ${COLORS.border}`, padding:"16px 10px", display:"flex", flexDirection:"column", gap:2, minHeight:"calc(100vh - 60px)" }}>
         {items.map(item => (
-          <button key={item.id} onClick={() => { onSelect(item.id); setMobileOpen(false); }}
-            style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", transition:"all 0.15s" }}>
+          <button key={item.id} onClick={() => onSelect(item.id)}
+            style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", transition:"all 0.15s", cursor:"pointer" }}>
             {item.label}
           </button>
         ))}
+      </nav>
+
+      {/* Mobile bottom navigation */}
+      <nav id="mobile-bottom-nav" style={{ display:"none", position:"fixed", bottom:0, left:0, right:0, background:"#fff", borderTop:`1px solid ${COLORS.border}`, zIndex:1000, padding:"6px 0 8px", boxShadow:"0 -2px 12px rgba(0,0,0,0.08)", overflowX:"auto", whiteSpace:"nowrap" }}>
+        <div style={{ display:"flex", justifyContent:"space-around", minWidth:"100%", padding:"0 8px" }}>
+          {items.map(item => (
+            <button key={item.id} onClick={() => onSelect(item.id)}
+              style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:"4px 8px", borderRadius:8, border:"none", background:"transparent", color:active===item.id?COLORS.teal:COLORS.text3, fontWeight:active===item.id?700:400, fontSize:10, cursor:"pointer", flex:1, minWidth:0 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:active===item.id?COLORS.teal:"transparent", marginBottom:2 }} />
+              <span style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:"100%" }}>{item.label}</span>
+            </button>
+          ))}
+        </div>
       </nav>
     </>
   );
@@ -1025,7 +1015,7 @@ function AdminApp({ store, updateStore, session, logout }) {
       <TopBar store={store} session={session} logout={logout} onCurriculumSwitch={switchCurriculum} />
       <div style={{ display:"flex", flex:1 }}>
         <Sidebar items={sidebarItems} active={page} onSelect={setPage} />
-        <main id="app-main" style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)", minWidth:0 }}>
+        <main id="app-main" style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)", minWidth:0, width:"100%" }}>
           {page === "dashboard"  && <AdminDashboard store={store} updateStore={updateStore} />}
           {page === "classes"    && <ClassesManager store={store} updateStore={updateStore} />}
           {page === "students" && <StudentsManager store={store} updateStore={updateStore} supabase={supabase} />}
@@ -2416,7 +2406,7 @@ const teacher = teacherRaw ? {
       <TopBar store={store} session={session} logout={logout} />
       <div style={{ display:"flex", flex:1 }}>
         <Sidebar items={sidebarItems} active={page} onSelect={setPage} />
-        <main id="app-main" style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)", minWidth:0 }}>
+        <main id="app-main" style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)", minWidth:0, width:"100%" }}>
           {page === "grades" && <TeacherGradeEntry store={store} updateStore={updateStore} teacher={teacher} supabase={supabase} />}
           {page === "homeclass" && <TeacherHomeClass store={store} updateStore={updateStore} teacher={teacher} supabase={supabase} />}
           {page === "profile"    && <TeacherProfile teacher={teacher} />}
