@@ -403,6 +403,29 @@ function FormGroup({ label, children, required }) {
   );
 }
 
+function PasswordInput({ label, required, value, onChange, placeholder }) {
+  const [show, setShow] = useState(false);
+  return (
+    <FormGroup label={label} required={required}>
+      <div style={{ position:"relative" }}>
+        <input
+          style={{ ...input(), paddingRight:44 }}
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+        />
+        <button
+          type="button"
+          onClick={() => setShow(s => !s)}
+          style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:COLORS.text3, fontSize:13, padding:"2px 4px" }}>
+          {show ? "Hide" : "Show"}
+        </button>
+      </div>
+    </FormGroup>
+  );
+}
+
 function Input({ label, required, ...props }) {
   return (
     <FormGroup label={label} required={required}>
@@ -671,7 +694,7 @@ function SetupWizard({ store, updateStore, supabase }) {
               <p style={{ color:COLORS.text2, fontSize:14, marginBottom:24 }}>Create the master admin account for your school.</p>
               <Input label="Full Name" required value={form.adminName} onChange={e => setForm(f => ({ ...f, adminName: e.target.value }))} placeholder="e.g. Jane Mwangi" />
               <Input label="Email Address" required type="email" value={form.adminEmail} onChange={e => setForm(f => ({ ...f, adminEmail: e.target.value }))} placeholder="admin@school.ac.ke" />
-              <Input label="Password" required type="password" value={form.adminPassword} onChange={e => setForm(f => ({ ...f, adminPassword: e.target.value }))} placeholder="Secure password" />
+              <PasswordInput label="Password" required value={form.adminPassword} onChange={e => setForm(f => ({ ...f, adminPassword: e.target.value }))} placeholder="Secure password" />
             </div>
           )}
         </div>
@@ -761,8 +784,8 @@ function PasswordResetPage({ supabase, onDone }) {
         </div>
         <div style={{ padding:"28px 32px" }}>
           <p style={{ color:COLORS.text2, fontSize:13, marginBottom:20 }}>Enter your new password below.</p>
-          <Input label="New Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
-          <Input label="Confirm Password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+          <PasswordInput label="New Password" required value={password} onChange={e => setPassword(e.target.value)} />
+<PasswordInput label="Confirm Password" required value={confirm} onChange={e => setConfirm(e.target.value)} />
           {error && <div style={{ color:COLORS.coral, fontSize:13, marginBottom:12 }}>⚠ {error}</div>}
           {success && <div style={{ color:COLORS.teal, fontSize:13, marginBottom:12, background:COLORS.tealL, padding:"8px 12px", borderRadius:7 }}>✓ {success}</div>}
           <button onClick={handleReset} disabled={loading} style={{ ...btn("primary"), width:"100%", justifyContent:"center", opacity:loading?0.6:1 }}>
@@ -878,7 +901,7 @@ function LoginPage({ store, onLogin, onSetup, supabase }) {
                   <button onClick={() => { setRole(null); setError(""); }} style={{ ...btn("ghost", { fontSize:13, padding:"5px 10px", marginBottom:16 }) }}>← Back</button>
                   <h2 style={{ marginBottom:20, fontSize:18 }}>Sign In as {role.charAt(0).toUpperCase()+role.slice(1)}</h2>
                   <Input label="Email Address" type="email" value={email} onChange={e => setEmail(e.target.value)} />
-<Input label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+<PasswordInput label="Password" required value={password} onChange={e => setPassword(e.target.value)} />
 {error && <div style={{ color:COLORS.coral, fontSize:13, marginBottom:12 }}>⚠ {error}</div>}
 {success && <div style={{ color:COLORS.teal, fontSize:13, marginBottom:12, background:COLORS.tealL, padding:"8px 12px", borderRadius:7 }}>✓ {success}</div>}
 <button onClick={handleLogin} disabled={loading} style={{ ...btn("primary"), width:"100%", justifyContent:"center", opacity:loading?0.6:1 }}>
@@ -1531,7 +1554,7 @@ async function saveEditTeacher() {
             <Input label="Full Name" required value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))} />
             <Input label="Email" required type="email" value={form.email} onChange={e => setForm(f=>({...f,email:e.target.value}))} />
             <Input label="Phone" value={form.phone} onChange={e => setForm(f=>({...f,phone:e.target.value}))} />
-            <Input label="Login Password" required type="password" value={form.password} onChange={e => setForm(f=>({...f,password:e.target.value}))} />
+            <PasswordInput label="Login Password" required value={form.password} onChange={e => setForm(f=>({...f,password:e.target.value}))} />
           </div>
           <Select label="Curriculum" options={store.curricula} value={form.curriculum} onChange={e => setForm(f=>({...f,curriculum:e.target.value,homeClass:"",homeStream:""}))} />
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
@@ -1758,7 +1781,7 @@ async function saveEditParent() {
           <Input label="Full Name" required value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))} />
           <Input label="Email" required type="email" value={form.email} onChange={e => setForm(f=>({...f,email:e.target.value}))} />
           <Input label="Phone" value={form.phone} onChange={e => setForm(f=>({...f,phone:e.target.value}))} />
-          <Input label="Login Password" required type="password" value={form.password} onChange={e => setForm(f=>({...f,password:e.target.value}))} />
+          <PasswordInput label="Login Password" required value={form.password} onChange={e => setForm(f=>({...f,password:e.target.value}))} />
           <FormGroup label="Link Children">
             <div style={{ maxHeight:160, overflowY:"auto", border:`1px solid ${COLORS.border}`, borderRadius:7, padding:"8px 10px" }}>
               {store.students.length === 0 && <div style={{ color:COLORS.text3, fontSize:13 }}>No students enrolled yet.</div>}
