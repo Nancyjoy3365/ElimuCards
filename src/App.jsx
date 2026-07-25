@@ -409,12 +409,14 @@ function PasswordInput({ label, required, value, onChange, placeholder }) {
     <FormGroup label={label} required={required}>
       <div style={{ position:"relative" }}>
         <input
-          style={{ ...input(), paddingRight:44 }}
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-        />
+       style={{ ...input(), paddingRight:44 }}
+       type={show ? "text" : "password"}
+       value={value}
+       onChange={onChange}
+       placeholder={placeholder}
+       name={label?.toLowerCase().replace(/\s+/g, '-')}
+       autoComplete={label?.toLowerCase().includes('confirm') ? 'new-password' : label?.toLowerCase().includes('new') ? 'new-password' : 'current-password'}
+       />
         <button
           type="button"
           onClick={() => setShow(s => !s)}
@@ -429,7 +431,7 @@ function PasswordInput({ label, required, value, onChange, placeholder }) {
 function Input({ label, required, ...props }) {
   return (
     <FormGroup label={label} required={required}>
-      <input style={input()} {...props} />
+      <input style={input()} name={label?.toLowerCase().replace(/\s+/g, '-')} autoComplete="on" {...props} />
     </FormGroup>
   );
 }
@@ -475,17 +477,55 @@ function TopBar({ store, session, logout, onCurriculumSwitch }) {
 }
 
 function Sidebar({ items, active, onSelect }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const isMobile = window.innerWidth < 768;
+
   return (
-    <nav style={{ width:220, flexShrink:0, background:"#fff", borderRight:`1px solid ${COLORS.border}`, padding:"16px 10px", display:"flex", flexDirection:"column", gap:2, minHeight:"calc(100vh - 60px)" }}>
-      {items.map(item => (
-        <button key={item.id} onClick={() => onSelect(item.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", transition:"all 0.15s" }}>
-          <span style={{ fontSize:16 }}>{item.icon}</span>{item.label}
-        </button>
-      ))}
-    </nav>
+    <>
+      {/* Mobile toggle button */}
+      <button
+        onClick={() => setMobileOpen(o => !o)}
+        style={{ display:"none", position:"fixed", bottom:20, right:20, zIndex:1100, width:48, height:48, borderRadius:"50%", background:COLORS.teal, color:"#fff", border:"none", fontSize:22, cursor:"pointer", boxShadow:"0 4px 12px rgba(13,148,136,0.4)", alignItems:"center", justifyContent:"center",
+          ...(typeof window !== 'undefined' && window.innerWidth < 768 ? { display:"flex" } : {})
+        }}
+        id="mobile-sidebar-toggle">
+        {mobileOpen ? "✕" : "☰"}
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div onClick={() => setMobileOpen(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:1050, display: typeof window !== 'undefined' && window.innerWidth < 768 ? "block" : "none" }} />
+      )}
+
+      <style>{`
+        @media (max-width: 768px) {
+          #mobile-sidebar-toggle { display: flex !important; }
+          #app-sidebar {
+            position: fixed !important;
+            left: ${mobileOpen ? '0' : '-240px'} !important;
+            top: 60px !important;
+            height: calc(100vh - 60px) !important;
+            z-index: 1060 !important;
+            transition: left 0.25s ease !important;
+            box-shadow: 4px 0 20px rgba(0,0,0,0.15) !important;
+          }
+          #app-main {
+            margin-left: 0 !important;
+          }
+        }
+      `}</style>
+
+      <nav id="app-sidebar" style={{ width:220, flexShrink:0, background:"#fff", borderRight:`1px solid ${COLORS.border}`, padding:"16px 10px", display:"flex", flexDirection:"column", gap:2, minHeight:"calc(100vh - 60px)" }}>
+        {items.map(item => (
+          <button key={item.id} onClick={() => { onSelect(item.id); setMobileOpen(false); }}
+            style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:"none", background:active===item.id?COLORS.tealL:"transparent", color:active===item.id?COLORS.teal2:COLORS.text2, fontWeight:active===item.id?600:400, fontSize:14, textAlign:"left", transition:"all 0.15s" }}>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+    </>
   );
 }
-
 // ─── SETUP WIZARD ─────────────────────────────────────────────────────────────
 
 function SetupWizard({ store, updateStore, supabase }) {
@@ -985,7 +1025,7 @@ function AdminApp({ store, updateStore, session, logout }) {
       <TopBar store={store} session={session} logout={logout} onCurriculumSwitch={switchCurriculum} />
       <div style={{ display:"flex", flex:1 }}>
         <Sidebar items={sidebarItems} active={page} onSelect={setPage} />
-        <main style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)" }}>
+        <main id="app-main" style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)", minWidth:0 }}>
           {page === "dashboard"  && <AdminDashboard store={store} updateStore={updateStore} />}
           {page === "classes"    && <ClassesManager store={store} updateStore={updateStore} />}
           {page === "students" && <StudentsManager store={store} updateStore={updateStore} supabase={supabase} />}
@@ -2376,7 +2416,7 @@ const teacher = teacherRaw ? {
       <TopBar store={store} session={session} logout={logout} />
       <div style={{ display:"flex", flex:1 }}>
         <Sidebar items={sidebarItems} active={page} onSelect={setPage} />
-        <main style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)" }}>
+        <main id="app-main" style={{ flex:1, padding:24, overflowY:"auto", maxHeight:"calc(100vh - 60px)", minWidth:0 }}>
           {page === "grades" && <TeacherGradeEntry store={store} updateStore={updateStore} teacher={teacher} supabase={supabase} />}
           {page === "homeclass" && <TeacherHomeClass store={store} updateStore={updateStore} teacher={teacher} supabase={supabase} />}
           {page === "profile"    && <TeacherProfile teacher={teacher} />}
