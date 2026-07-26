@@ -260,10 +260,17 @@ export default function App() {
     setStore(prev => typeof patch === "function" ? patch(prev) : { ...prev, ...patch });
   }
 
-  async function login(email, password) {
+  async function login(email, password, expectedRole) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return error.message;
     const meta = data.user.user_metadata;
+
+    // Check role matches what was selected on login page
+    if (expectedRole && meta.role !== expectedRole) {
+      await supabase.auth.signOut();
+      return `This account is not a ${expectedRole}. Please select the correct role.`;
+    }
+
     setSession({
       userId: data.user.id,
       role: meta.role,
@@ -273,7 +280,6 @@ export default function App() {
     await loadSchoolData(meta.schoolId);
     return null;
   }
-
   async function logout() {
     await supabase.auth.signOut();
     setSession(null);
@@ -658,10 +664,16 @@ function SetupWizard({ store, updateStore, supabase }) {
       <div style={{ ...card(), width:"100%", maxWidth:680, padding:0, overflow:"hidden" }}>
         {/* Progress */}
         <div style={{ background:`linear-gradient(135deg, ${COLORS.teal},${COLORS.teal2})`, padding:"24px 32px", color:"#fff" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-            <span style={{ fontFamily:"Sora", fontSize:22, fontWeight:700 }}>ElimuCards</span>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontFamily:"Plus Jakarta Sans", fontSize:22, fontWeight:700 }}>ElimuCards</span>
             <span style={{ fontSize:12, opacity:.7, fontWeight:400 }}>School Setup</span>
           </div>
+          <button onClick={() => updateStore({ setupComplete: false })}
+            style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", padding:"5px 12px", borderRadius:8, fontSize:12, fontWeight:600, cursor:"pointer" }}>
+            ← Back to Login
+          </button>
+        </div>
           <div style={{ display:"flex", gap:6 }}>
             {Array.from({ length: totalSteps }, (_, i) => (
               <div key={i} style={{ height:4, flex:1, borderRadius:2, background: i < step ? "#fff" : "rgba(255,255,255,0.25)", transition:"background 0.3s" }} />
@@ -860,11 +872,10 @@ function LoginPage({ store, onLogin, onSetup, supabase }) {
 
   async function handleLogin() {
     setError(""); setLoading(true);
-    const result = await onLogin(email, password);
+    const result = await onLogin(email, password, role);
     if (result) setError(result);
     setLoading(false);
   }
-
   async function handleSignup() {
     setError(""); setLoading(true);
     if (!name || !email || !password) { setError("All fields are required."); setLoading(false); return; }
