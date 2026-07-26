@@ -1337,122 +1337,80 @@ async function saveEditStudent() {
     const reader = new FileReader();
     reader.onload = e => {
       const lines = e.target.result.split(/\r?\n/).filter(Boolean);
-      const header = lines[0].split(/,|\t/).map(h => h.trim().toLowerCase());
-      const nameIdx = header.findIndex(h => h.includes("name"));
-      const admIdx = header.findIndex(h => h.includes("adm") || h.includes("no") || h.includes("id"));
-      const genderIdx = header.findIndex(h => h.includes("gender") || h.includes("sex"));
-      const gradeIdx = header.findIndex(h => h.includes("grade") || h.includes("class") || h.includes("year"));
-      const streamIdx = header.findIndex(h => h.includes("stream") || h.includes("section"));
-
+      if (lines.length < 2) { alert("File appears empty or has no data rows."); return; }
+      
+      const separator = lines[0].includes('\t') ? '\t' : ',';
+      const headers = lines[0].split(separator).map(h => h.trim().replace(/^"|"$/g, ""));
+      
       const newStudents = [];
+      let skipped = 0;
+
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(/,|\t/).map(c => c.trim().replace(/^"|"$/g, ""));
-        if (!cols[nameIdx]) continue;
+        const cols = lines[i].split(separator).map(c => c.trim().replace(/^"|"$/g, ""));
+        if (cols.length < 2) continue;
+
+        // Smart column detection — checks multiple possible header names
+        function findCol(keywords) {
+          const idx = headers.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
+          return idx >= 0 ? cols[idx] : "";
+        }
+
+        const name = findCol(["name","student","pupil","learner","full"]);
+        const admNo = findCol(["adm","no","number","id","reg","roll"]);
+        const gender = findCol(["gender","sex"]);
+        const grade = findCol(["grade","class","year","level","form"]);
+        const stream = findCol(["stream","section","division","arm","group"]);
+
+        if (!name) { skipped++; continue; }
+
         newStudents.push({
           id: generateId(),
-          name: nameIdx >= 0 ? cols[nameIdx] : "",
-          admNo: admIdx >= 0 ? cols[admIdx] : `ADM${i}`,
-          gender: genderIdx >= 0 ? cols[genderIdx] : "",
+          name,
+          admNo: admNo || `ADM${i}`,
+          gender: gender || "",
           curriculum: activeCurTab,
-          grade: gradeIdx >= 0 ? cols[gradeIdx] : "",
-          stream: streamIdx >= 0 ? cols[streamIdx] : "Main",
+          grade: grade || "",
+          stream: stream || "Main",
           parentId: null,
         });
       }
-      updateStore(s => ({ ...s, students: [...s.students, ...newStudents] }));
-      alert(`Imported ${newStudents.length} students.`);
+
+      if (newStudents.length === 0) {
+        alert(`No students could be imported. Headers found: ${headers.join(", ")}\n\nMake sure your file has a column for student name.`);
+        return;
+      }
+
+      // Show confirmation with what was detected
+      const confirmed = confirm(
+        `Ready to import ${newStudents.length} students${skipped > 0 ? ` (${skipped} rows skipped)` : ""}.\n\n` +
+        `Headers detected: ${headers.join(", ")}\n\n` +
+        `First student: ${newStudents[0].name}, Adm: ${newStudents[0].admNo}, Grade: ${newStudents[0].grade || "not detected"}, Stream: ${newStudents[0].stream}\n\n` +
+        `Click OK to import or Cancel to check your file.`
+      );
+
+      if (!confirmed) return;
+
+      // Save each student to Supabase
+      Promise.all(newStudents.map(s =>
+        supabase.from('students').insert({
+          school_id: store.schoolId,
+          name: s.name,
+          adm_no: s.admNo,
+          gender: s.gender,
+          curriculum: s.curriculum,
+          grade: s.grade,
+          stream: s.stream,
+        }).select().single()
+      )).then(results => {
+        const saved = results.map(r => r.data).filter(Boolean);
+        updateStore(st => ({ ...st, students: [...st.students, ...saved] }));
+        alert(`Successfully imported ${saved.length} students!`);
+      }).catch(err => {
+        alert("Error saving to database: " + err.message);
+      });
     };
     reader.readAsText(file);
   }
-
-  const classesByCurriculum = store.classes.filter(c => c.curriculum === activeCurTab);
-
-  return (
-    <div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
-        <h1 style={{ fontSize:22, fontWeight:800 }}>Students</h1>
-        <div style={{ display:"flex", gap:8 }}>
-          <button style={btn("ghost")} onClick={() => fileRef.current?.click()}>📥 Import CSV/TSV</button>
-          <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" style={{ display:"none" }} onChange={e => { if(e.target.files[0]) handleCSV(e.target.files[0]); e.target.value=""; }} />
-          <button style={btn("primary")} onClick={() => { setForm(f => ({ ...f, curriculum:activeCurTab })); setShowAddModal(true); }}>+ Add Student</button>
-        </div>
-      </div>
-
-      {store.curricula.length > 1 && (
-        <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
-          {store.curricula.map(c => (
-            <button key={c} onClick={() => setActiveCurTab(c)} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:activeCurTab===c?(c==="CBC"?COLORS.teal:COLORS.amber):"transparent", color:activeCurTab===c?"#fff":(c==="CBC"?COLORS.teal:COLORS.amber), transition:"all 0.15s" }}>
-              {c === "CBC" ? "🇰🇪 CBC" : "🇬🇧 Cambridge"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div style={{ marginBottom:14 }}>
-        <input style={{ ...input(), maxWidth:320 }} placeholder="Search by name or admission number…" value={search} onChange={e => setSearch(e.target.value)} />
-      </div>
-
-      <div style={{ ...card(), overflow:"auto" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
-          <thead>
-            <tr style={{ background:COLORS.bg }}>
-              {["#","Adm No","Full Name","Gender","Grade","Stream","Actions"].map(h => (
-                <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}`, whiteSpace:"nowrap" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {students.length === 0 && (
-              <tr><td colSpan={7} style={{ padding:32, textAlign:"center", color:COLORS.text3 }}>No students found. Import a roster or add students manually.</td></tr>
-            )}
-            {students.map((s, i) => (
-              <tr key={s.id} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
-                <td style={{ padding:"9px 14px", color:COLORS.text3 }}>{i+1}</td>
-                <td style={{ padding:"9px 14px", fontWeight:600, color:COLORS.teal2 }}>{s.admNo || s.adm_no}</td>
-                <td style={{ padding:"9px 14px", fontWeight:500 }}>{s.name}</td>
-                <td style={{ padding:"9px 14px", color:COLORS.text2 }}>{s.gender}</td>
-                <td style={{ padding:"9px 14px" }}>{s.grade}</td>
-                <td style={{ padding:"9px 14px" }}>{s.stream}</td>
-                <td style={{ padding:"9px 14px", display:"flex", gap:6 }}>
-                  <button onClick={() => openEditStudent(s)} style={btn("secondary", { padding:"3px 10px", fontSize:12 })}>Edit</button>
-                  <button onClick={() => deleteStudent(s.id)} style={btn("danger", { padding:"3px 10px", fontSize:12 })}>Remove</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {showAddModal && (
-        <Modal title="Add Student" onClose={() => setShowAddModal(false)}>
-          <Input label="Full Name" required value={form.name} onChange={e => setForm(f => ({ ...f, name:e.target.value }))} />
-          <Input label="Admission Number" required value={form.admNo} onChange={e => setForm(f => ({ ...f, admNo:e.target.value }))} />
-          <Select label="Gender" options={["Male","Female","Other"]} value={form.gender} onChange={e => setForm(f => ({ ...f, gender:e.target.value }))} />
-          <Select label="Curriculum" options={store.curricula} value={form.curriculum} onChange={e => setForm(f => ({ ...f, curriculum:e.target.value, grade:"", stream:"" }))} />
-          <Select label="Grade" required options={store.classes.filter(c=>c.curriculum===form.curriculum).map(c=>c.grade)} value={form.grade} onChange={e => setForm(f => ({ ...f, grade:e.target.value, stream:"" }))} />
-          <Select label="Stream" required options={(store.classes.find(c=>c.curriculum===form.curriculum&&c.grade===form.grade)?.streams||[]).map(s=>s.name)} value={form.stream} onChange={e => setForm(f => ({ ...f, stream:e.target.value }))} />
-          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:8 }}>
-            <button style={btn("ghost")} onClick={() => setShowAddModal(false)}>Cancel</button>
-            <button style={btn("primary")} onClick={addStudent}>Add Student</button>
-          </div>
-        </Modal>
-      )}
-      {editStudent && (
-  <Modal title="Edit Student" onClose={() => setEditStudent(null)}>
-    <Input label="Full Name" required value={editStudent.name} onChange={e => setEditStudent(f=>({...f,name:e.target.value}))} />
-    <Input label="Admission Number" required value={editStudent.admNo} onChange={e => setEditStudent(f=>({...f,admNo:e.target.value}))} />
-    <Select label="Gender" options={["Male","Female","Other"]} value={editStudent.gender} onChange={e => setEditStudent(f=>({...f,gender:e.target.value}))} />
-    <Select label="Grade" required options={store.classes.filter(c=>c.curriculum===editStudent.curriculum).map(c=>c.grade)} value={editStudent.grade} onChange={e => setEditStudent(f=>({...f,grade:e.target.value,stream:""}))} />
-    <Select label="Stream" required options={(store.classes.find(c=>c.curriculum===editStudent.curriculum&&c.grade===editStudent.grade)?.streams||[]).map(s=>s.name)} value={editStudent.stream} onChange={e => setEditStudent(f=>({...f,stream:e.target.value}))} />
-    <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:8 }}>
-      <button style={btn("ghost")} onClick={() => setEditStudent(null)}>Cancel</button>
-      <button style={btn("primary")} onClick={saveEditStudent}>Save Changes</button>
-    </div>
-  </Modal>
-)} 
-    </div>
-  );
-}
 
 // ─── TEACHERS MANAGER ─────────────────────────────────────────────────────────
 
@@ -3034,6 +2992,7 @@ function ParentApp({ store, updateStore, session, logout }) {
 
 function ParentChildView({ store, child }) {
   const [selectedTerm, setSelectedTerm] = useState(store.currentTerm);
+  const [expandedSubjects, setExpandedSubjects] = useState({});
 
   const classCfg = store.classes.find(c => c.curriculum === child.curriculum && c.grade === child.grade);
   const subjects = classCfg?.subjects || [];
@@ -3053,30 +3012,24 @@ function ParentChildView({ store, child }) {
     { bg:"#f0fdf4", fg:"#15803d", border:"#86efac" },
   ];
 
-  function getGrade(sub, term) {
-    return store.grades?.[child.id]?.[sub]?.[term];
+  function toggleSubject(sub) {
+    setExpandedSubjects(prev => ({ ...prev, [sub]: !prev[sub] }));
   }
 
+  function getGrade(sub, term) { return store.grades?.[child.id]?.[sub]?.[term]; }
   function getStrands(sub, term) {
     return (store.strands || []).filter(st =>
-      st.curriculum === child.curriculum &&
-      st.grade === child.grade &&
-      st.subject === sub &&
-      st.term === term
+      st.curriculum === child.curriculum && st.grade === child.grade &&
+      st.subject === sub && st.term === term
     );
   }
-
   function getSubStrands(strandId) {
-    return (store.subStrands || []).filter(ss => ss.strand_id === strandId).sort((a, b) => a.sort_order - b.sort_order);
+    return (store.subStrands || []).filter(ss => ss.strand_id === strandId).sort((a,b) => a.sort_order - b.sort_order);
   }
-
   function getOutcomes(subStrandId) {
-    return (store.learningOutcomes || []).filter(lo => lo.sub_strand_id === subStrandId).sort((a, b) => a.sort_order - b.sort_order);
+    return (store.learningOutcomes || []).filter(lo => lo.sub_strand_id === subStrandId).sort((a,b) => a.sort_order - b.sort_order);
   }
-
-  function getOutcomeGrade(outcomeId, term) {
-    return store.outcomeGrades?.[child.id]?.[outcomeId]?.[term];
-  }
+  function getOutcomeGrade(outcomeId, term) { return store.outcomeGrades?.[child.id]?.[outcomeId]?.[term]; }
 
   function GradePill({ grade, size="sm" }) {
     if (!grade) return <span style={{ fontSize:size==="sm"?10:12, color:COLORS.text3 }}>—</span>;
@@ -3085,7 +3038,6 @@ function ParentChildView({ store, child }) {
     return <span style={{ fontSize:size==="sm"?10:12, fontWeight:800, padding:size==="sm"?"1px 7px":"3px 10px", borderRadius:20, background:bg, color:fg }}>{grade}</span>;
   }
 
-  // Overall trend
   function getTrend(sub) {
     const gradeOrder = { EE:4, ME:3, AE:2, BE:1 };
     const values = terms.map(t => {
@@ -3106,6 +3058,107 @@ function ParentChildView({ store, child }) {
     return { label:"Steady", color:COLORS.amber, icon:"→" };
   }
 
+  function handleDownload() {
+    const printWindow = window.open('', '_blank');
+    const gradeColors = { EE:"#0f766e", ME:"#1d4ed8", AE:"#b45309", BE:"#b91c1c" };
+    const gradeBg = { EE:"#ccfbf1", ME:"#dbeafe", AE:"#fef3c7", BE:"#fee2e2" };
+
+    let subjectsHTML = subjects.map(sub => {
+      const strands = getStrands(sub, selectedTerm);
+      const g = getGrade(sub, selectedTerm);
+      let contentHTML = "";
+
+      if (strands.length > 0) {
+        contentHTML = strands.map(strand => {
+          const subs = getSubStrands(strand.id);
+          return `
+            <div style="margin-bottom:10px;">
+              <div style="background:#134e4a; color:#fff; padding:5px 10px; font-size:11px; font-weight:700;">${strand.name}</div>
+              ${subs.map(ss => {
+                const outcomes = getOutcomes(ss.id);
+                return `
+                  <div style="padding:3px 10px 3px 16px; background:#f8fafc; font-size:10px; font-style:italic; color:#475569;">${ss.name}</div>
+                  ${outcomes.map(lo => {
+                    const og = getOutcomeGrade(lo.id, selectedTerm);
+                    const grade = og?.grade || "";
+                    return `
+                      <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 10px 4px 24px; border-bottom:1px solid #f1f5f9;">
+                        <span style="font-size:10px; color:#0f172a; flex:1;">${lo.name}</span>
+                        ${grade ? `<span style="font-size:10px; font-weight:800; padding:1px 7px; border-radius:20px; background:${gradeBg[grade]||"#f1f5f9"}; color:${gradeColors[grade]||"#64748b"};">${grade}</span>` : '<span style="font-size:10px; color:#94a3b8;">—</span>'}
+                        ${og?.reflection ? `<span style="font-size:9px; color:#64748b; margin-left:8px; font-style:italic;">${og.reflection}</span>` : ""}
+                      </div>`;
+                  }).join("")}`;
+              }).join("")}
+            </div>`;
+        }).join("");
+      } else if (g) {
+        if (child.curriculum === "CBC") {
+          contentHTML = `<div style="padding:8px 12px; display:flex; align-items:center; gap:8px;">
+            ${g.grade ? `<span style="font-weight:800; font-size:14px; padding:2px 10px; border-radius:20px; background:${gradeBg[g.grade]||"#f1f5f9"}; color:${gradeColors[g.grade]||"#64748b"};">${g.grade}</span>` : ""}
+            ${g.comment ? `<span style="font-size:11px; color:#475569; font-style:italic;">${g.comment}</span>` : ""}
+          </div>`;
+        } else {
+          const examConfig = store.examConfig || ["Mid Term","End Term"];
+          contentHTML = examConfig.map(exam => {
+            const ek = `${selectedTerm}__${exam}`;
+            const eg = store.grades?.[child.id]?.[sub]?.[ek];
+            return `<div style="display:flex; justify-content:space-between; padding:5px 12px; border-bottom:1px solid #f1f5f9;">
+              <span style="font-size:11px; color:#475569;">${exam}</span>
+              <span style="font-size:11px; font-weight:700; color:#0d9488;">${eg?.grade || ""}${eg?.score ? ` ${eg.score}%` : ""}${!eg?.grade && !eg?.score ? "—" : ""}</span>
+            </div>`;
+          }).join("");
+        }
+      } else {
+        contentHTML = `<div style="padding:8px 12px; font-size:11px; color:#94a3b8;">No grades entered yet.</div>`;
+      }
+
+      return `
+        <div style="border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; overflow:hidden; page-break-inside:avoid;">
+          <div style="background:#f8fafc; padding:8px 12px; font-weight:700; font-size:12px; color:#0f172a; border-bottom:1px solid #e2e8f0;">${sub}</div>
+          ${contentHTML}
+        </div>`;
+    }).join("");
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>${child.name} — Report Card</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: Arial, sans-serif; color: #0f172a; padding: 20px; font-size: 12px; }
+          @media print {
+            body { padding: 10px; }
+            @page { size: A4; margin: 15mm; }
+          }
+        </style>
+      </head>
+      <body>
+        <div style="background:linear-gradient(135deg,#134e4a,#1a5276); color:#fff; padding:20px; border-radius:8px; margin-bottom:20px;">
+          <div style="font-size:22px; font-weight:800; margin-bottom:4px;">${store.schoolName}</div>
+          <div style="font-size:11px; opacity:0.8;">Academic Report Card — ${store.currentYear}</div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:14px;">
+            <div><div style="font-size:9px; opacity:0.7;">Student Name</div><div style="font-weight:700; font-size:13px;">${child.name}</div></div>
+            <div><div style="font-size:9px; opacity:0.7;">Admission No</div><div style="font-weight:700; font-size:13px;">${child.admNo || child.adm_no || "—"}</div></div>
+            <div><div style="font-size:9px; opacity:0.7;">Class</div><div style="font-weight:700; font-size:13px;">${child.grade} · ${child.stream}</div></div>
+            <div><div style="font-size:9px; opacity:0.7;">Curriculum</div><div style="font-weight:700; font-size:13px;">${child.curriculum}</div></div>
+            <div><div style="font-size:9px; opacity:0.7;">Term</div><div style="font-weight:700; font-size:13px;">${selectedTerm}</div></div>
+            <div><div style="font-size:9px; opacity:0.7;">Year</div><div style="font-weight:700; font-size:13px;">${store.currentYear}</div></div>
+          </div>
+        </div>
+        <div style="font-weight:700; font-size:14px; margin-bottom:12px;">${selectedTerm} Results</div>
+        ${subjectsHTML}
+        <div style="margin-top:20px; padding-top:12px; border-top:1px solid #e2e8f0; font-size:10px; color:#94a3b8; text-align:center;">
+          Generated by ElimuCards · elimu-cards.vercel.app · ${new Date().toLocaleDateString()}
+        </div>
+        <script>window.onload = function() { window.print(); }</script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  }
+
   return (
     <div className="fade-in">
       {/* Child header */}
@@ -3114,15 +3167,14 @@ function ParentChildView({ store, child }) {
           <div style={{ width:56, height:56, borderRadius:"50%", background:"rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:24 }}>
             {child.name.charAt(0)}
           </div>
-          <div>
+          <div style={{ flex:1 }}>
             <div style={{ fontWeight:800, fontSize:22, letterSpacing:-0.5 }}>{child.name}</div>
             <div style={{ fontSize:13, opacity:.8, marginTop:2 }}>{child.grade} · {child.stream} · <CurriculumBadge curriculum={child.curriculum} /></div>
             <div style={{ fontSize:11, opacity:.65, marginTop:2 }}>Adm: {child.admNo || child.adm_no}</div>
           </div>
-          <div style={{ marginLeft:"auto", textAlign:"right" }}>
-            <div style={{ fontSize:11, opacity:.7 }}>Academic Year</div>
-            <div style={{ fontWeight:800, fontSize:18 }}>{store.currentYear}</div>
-          </div>
+          <button onClick={handleDownload} style={{ background:"rgba(255,255,255,0.15)", border:"1.5px solid rgba(255,255,255,0.4)", color:"#fff", padding:"8px 16px", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+            ↓ Download Report
+          </button>
         </div>
       </div>
 
@@ -3130,121 +3182,133 @@ function ParentChildView({ store, child }) {
       <div style={{ display:"flex", gap:6, marginBottom:20 }}>
         {terms.map(t => (
           <button key={t} onClick={() => setSelectedTerm(t)}
-            style={{ flex:1, padding:"10px 0", borderRadius:10, border:`2px solid ${selectedTerm===t ? COLORS.teal : COLORS.border}`, background:selectedTerm===t ? COLORS.tealL : "#fff", fontWeight:700, fontSize:13, cursor:"pointer", color:selectedTerm===t ? COLORS.teal2 : COLORS.text2, transition:"all 0.15s", textAlign:"center" }}>
+            style={{ flex:1, padding:"10px 0", borderRadius:10, border:`2px solid ${selectedTerm===t?COLORS.teal:COLORS.border}`, background:selectedTerm===t?COLORS.tealL:"#fff", fontWeight:700, fontSize:13, cursor:"pointer", color:selectedTerm===t?COLORS.teal2:COLORS.text2, transition:"all 0.15s", textAlign:"center" }}>
             {t}
             {t === store.currentTerm && <div style={{ fontSize:9, color:COLORS.teal, fontWeight:500 }}>Current</div>}
           </button>
         ))}
       </div>
 
-      {/* Subject cards grid */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:14, marginBottom:20 }}>
+      {/* Subject cards — collapsible */}
+      <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
         {subjects.map((sub, si) => {
           const col = subjectColors[si % subjectColors.length];
           const strands = getStrands(sub, selectedTerm);
           const hasStrands = strands.length > 0;
           const g = getGrade(sub, selectedTerm);
           const trend = getTrend(sub);
+          const isExpanded = expandedSubjects[sub];
+
+          // Summary grade for collapsed view
+          function getSummaryGrade() {
+            if (hasStrands) {
+              const allOutcomes = strands.flatMap(st => getSubStrands(st.id).flatMap(ss => getOutcomes(ss.id)));
+              const grades = allOutcomes.map(lo => getOutcomeGrade(lo.id, selectedTerm)?.grade).filter(Boolean);
+              if (grades.length === 0) return null;
+              const counts = { EE:0, ME:0, AE:0, BE:0 };
+              grades.forEach(g => { if (counts[g] !== undefined) counts[g]++; });
+              const dominant = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+              return dominant[1] > 0 ? dominant[0] : null;
+            }
+            return g?.grade || null;
+          }
+
+          const summaryGrade = getSummaryGrade();
 
           return (
             <div key={sub} style={{ background:"#fff", borderRadius:12, border:`1.5px solid ${col.border}`, overflow:"hidden", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
-              {/* Subject header */}
-              <div style={{ background:col.bg, padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                <div style={{ fontWeight:700, fontSize:13, color:col.fg }}>{sub}</div>
-                {trend && (
-                  <span style={{ fontSize:11, fontWeight:700, color:trend.color, background:"#fff", padding:"1px 8px", borderRadius:20 }}>
-                    {trend.icon} {trend.label}
-                  </span>
-                )}
-              </div>
+              {/* Subject header — always visible, click to expand */}
+              <button onClick={() => toggleSubject(sub)}
+                style={{ width:"100%", background:col.bg, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", border:"none", cursor:"pointer", textAlign:"left" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontWeight:700, fontSize:13, color:col.fg }}>{sub}</span>
+                  {trend && <span style={{ fontSize:10, fontWeight:700, color:trend.color, background:"#fff", padding:"1px 8px", borderRadius:20 }}>{trend.icon} {trend.label}</span>}
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  {summaryGrade && !isExpanded && <GradePill grade={summaryGrade} />}
+                  {!summaryGrade && !isExpanded && <span style={{ fontSize:11, color:COLORS.text3 }}>No grades</span>}
+                  <span style={{ fontSize:16, color:col.fg, fontWeight:700 }}>{isExpanded ? "▾" : "▸"}</span>
+                </div>
+              </button>
 
-              {/* Content */}
-              <div style={{ padding:"10px 14px" }}>
-                {hasStrands ? (
-                  strands.map(strand => {
-                    const subs = getSubStrands(strand.id);
-                    return (
-                      <div key={strand.id} style={{ marginBottom:8 }}>
-                        <div style={{ fontSize:10, fontWeight:700, color:col.fg, marginBottom:4, textTransform:"uppercase", letterSpacing:0.3 }}>{strand.name}</div>
-                        {subs.map(ss => {
-                          const outcomes = getOutcomes(ss.id);
-                          return (
-                            <div key={ss.id} style={{ marginBottom:6 }}>
-                              <div style={{ fontSize:10, color:COLORS.text3, fontStyle:"italic", marginBottom:3 }}>{ss.name}</div>
-                              {outcomes.map(lo => {
-                                const og = getOutcomeGrade(lo.id, selectedTerm);
-                                return (
-                                  <div key={lo.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"4px 0", borderBottom:`1px solid #f8fafc` }}>
-                                    <span style={{ fontSize:11, color:COLORS.text, flex:1, paddingRight:8, lineHeight:1.4 }}>{lo.name}</span>
-                                    <GradePill grade={og?.grade} />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })}
-                        {g?.comment && <div style={{ fontSize:10, color:COLORS.text3, fontStyle:"italic", marginTop:4 }}>{g.comment}</div>}
-                      </div>
-                    );
-                  })
-                ) : g ? (
-                  <div>
-                    {child.curriculum === "CBC" ? (
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <GradePill grade={g.grade} size="lg" />
-                        {g.grade && <span style={{ fontSize:11, color:COLORS.text2 }}>{CBC_GRADE_LABELS[g.grade]}</span>}
-                      </div>
-                    ) : isCheckpoint ? (
-                      <div>
-                        {(store.examConfig || ["Mid Term","End Term"]).map(exam => {
-                          const ek = `${selectedTerm}__${exam}`;
-                          const eg = store.grades?.[child.id]?.[sub]?.[ek];
-                          return (
-                            <div key={exam} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"3px 0", borderBottom:`1px solid ${COLORS.border}` }}>
-                              <span style={{ fontSize:11, color:COLORS.text2 }}>{exam}</span>
-                              <span style={{ fontWeight:800, fontSize:12, color:eg?.score?COLORS.teal2:COLORS.text3 }}>
-                                {eg?.score ? `${eg.score}/50` : "—"}
-                                {eg?.score && <CheckpointBand score={Number(eg.score)} />}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div>
-                        {(store.examConfig || ["Mid Term","End Term"]).map(exam => {
-                          const ek = `${selectedTerm}__${exam}`;
-                          const eg = store.grades?.[child.id]?.[sub]?.[ek];
-                          const isEndTerm = exam === "End Term";
-                          return (
-                            <div key={exam} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"4px 0", borderBottom:`1px solid ${COLORS.border}`, background:isEndTerm?"rgba(204,251,241,0.2)":"transparent" }}>
-                              <span style={{ fontSize:11, color:COLORS.text2, fontWeight:isEndTerm?700:400 }}>{exam}{isEndTerm && " ★"}</span>
-                              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                                {eg?.grade && <span style={{ fontWeight:800, fontSize:12, color:COLORS.teal2 }}>{eg.grade}</span>}
-                                {eg?.score && <span style={{ fontSize:11, color:COLORS.text3 }}>{eg.score}%</span>}
-                                {!eg?.grade && !eg?.score && <span style={{ fontSize:11, color:COLORS.text3 }}>—</span>}
+              {/* Expanded content */}
+              {isExpanded && (
+                <div style={{ padding:"10px 14px" }} className="fade-in">
+                  {hasStrands ? (
+                    strands.map(strand => {
+                      const subs = getSubStrands(strand.id);
+                      return (
+                        <div key={strand.id} style={{ marginBottom:10 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:col.fg, marginBottom:6, padding:"4px 8px", background:col.bg, borderRadius:6 }}>{strand.name}</div>
+                          {subs.map(ss => {
+                            const outcomes = getOutcomes(ss.id);
+                            return (
+                              <div key={ss.id} style={{ marginBottom:8, paddingLeft:8 }}>
+                                <div style={{ fontSize:10, color:COLORS.text3, fontStyle:"italic", marginBottom:4 }}>{ss.name}</div>
+                                {outcomes.map(lo => {
+                                  const og = getOutcomeGrade(lo.id, selectedTerm);
+                                  return (
+                                    <div key={lo.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"5px 0", borderBottom:`1px solid #f8fafc` }}>
+                                      <span style={{ fontSize:11, color:COLORS.text, flex:1, paddingRight:8, lineHeight:1.4 }}>{lo.name}</span>
+                                      <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                                        <GradePill grade={og?.grade} />
+                                        {og?.reflection && <span style={{ fontSize:10, color:COLORS.text3, fontStyle:"italic" }}>{og.reflection}</span>}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {g.comment && <div style={{ fontSize:11, color:COLORS.text3, fontStyle:"italic", marginTop:6 }}>{g.comment}</div>}
-                  </div>
-                ) : (
-                  <div style={{ fontSize:12, color:COLORS.text3, padding:"8px 0" }}>No grades entered yet for {selectedTerm}.</div>
-                )}
-              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })
+                  ) : g ? (
+                    <div>
+                      {child.curriculum === "CBC" ? (
+                        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0" }}>
+                          <GradePill grade={g.grade} size="lg" />
+                          {g.grade && <span style={{ fontSize:11, color:COLORS.text2 }}>{CBC_GRADE_LABELS[g.grade]}</span>}
+                          {g.comment && <span style={{ fontSize:11, color:COLORS.text3, fontStyle:"italic" }}>{g.comment}</span>}
+                        </div>
+                      ) : (
+                        <div>
+                          {(store.examConfig || ["Mid Term","End Term"]).map(exam => {
+                            const ek = `${selectedTerm}__${exam}`;
+                            const eg = store.grades?.[child.id]?.[sub]?.[ek];
+                            const isEndTerm = exam === "End Term";
+                            return (
+                              <div key={exam} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid #f8fafc`, background:isEndTerm?"rgba(204,251,241,0.15)":"transparent" }}>
+                                <span style={{ fontSize:12, color:COLORS.text2, fontWeight:isEndTerm?700:400 }}>{exam}{isEndTerm ? " ★" : ""}</span>
+                                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                  {eg?.grade && <span style={{ fontWeight:800, fontSize:13, color:COLORS.teal2 }}>{eg.grade}</span>}
+                                  {eg?.score && <span style={{ fontSize:11, color:COLORS.text3 }}>{eg.score}%</span>}
+                                  {!eg?.grade && !eg?.score && <span style={{ fontSize:11, color:COLORS.text3 }}>—</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:12, color:COLORS.text3, padding:"8px 0" }}>No grades entered yet for {selectedTerm}.</div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Term comparison summary */}
+      {/* Term comparison table */}
       <div style={{ ...card(), overflow:"auto" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${COLORS.border}` }}>
-          <div style={{ fontWeight:700, fontSize:14 }}>Term Comparison</div>
-          <div style={{ fontSize:12, color:COLORS.text2, marginTop:2 }}>See progress across all three terms</div>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${COLORS.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontWeight:700, fontSize:14 }}>Term Comparison</div>
+            <div style={{ fontSize:12, color:COLORS.text2, marginTop:2 }}>Progress across all three terms</div>
+          </div>
+          <button onClick={handleDownload} style={{ ...btn("secondary", { fontSize:12, padding:"5px 12px" }) }}>↓ Download</button>
         </div>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
           <thead>
