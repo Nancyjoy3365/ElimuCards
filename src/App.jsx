@@ -184,32 +184,52 @@ export default function App() {
   async function loadSchoolData(schoolId) {
     if (!schoolId) return;
     localStorage.setItem('elimucards_school_id', schoolId);
-    const [
-      { data: school },
-      { data: classes },
-      { data: students },
-      { data: teachers },
-      { data: parents },
-      { data: grades },
-      { data: remarks },
-      { data: strands },
-      { data: subStrands },
-      { data: learningOutcomes },
-      { data: outcomeGrades },
-    ] = await Promise.all([
-      supabase.from('schools').select('*').eq('id', schoolId).single(),
-      supabase.from('classes').select('*').eq('school_id', schoolId),
-      supabase.from('students').select('*').eq('school_id', schoolId),
-      supabase.from('teachers').select('*').eq('school_id', schoolId),
-      supabase.from('parents').select('*').eq('school_id', schoolId),
-      supabase.from('grades').select('*'),
-      supabase.from('remarks').select('*'),
-      supabase.from('strands').select('*').eq('school_id', schoolId),
-      supabase.from('sub_strands').select('*'),
-      supabase.from('learning_outcomes').select('*'),
-      supabase.from('outcome_grades').select('*'),
-    ]);
+const { data: school } = await supabase
+  .from('schools').select('*').eq('id', schoolId).single();
 
+const [
+  { data: classes },
+  { data: students },
+  { data: teachers },
+  { data: parents },
+  { data: strands },
+] = await Promise.all([
+  supabase.from('classes').select('*').eq('school_id', schoolId),
+  supabase.from('students').select('*').eq('school_id', schoolId),
+  supabase.from('teachers').select('*').eq('school_id', schoolId),
+  supabase.from('parents').select('*').eq('school_id', schoolId),
+  supabase.from('strands').select('*').eq('school_id', schoolId),
+]);
+
+const studentIds = (students || []).map(s => s.id);
+const teacherIds = (teachers || []).map(t => t.id);
+const strandIds = (strands || []).map(s => s.id);
+
+const { data: subStrands } = strandIds.length > 0
+  ? await supabase.from('sub_strands').select('*').in('strand_id', strandIds)
+  : { data: [] };
+
+const subStrandIds = (subStrands || []).map(ss => ss.id);
+
+const [
+  { data: grades },
+  { data: remarks },
+  { data: learningOutcomes },
+  { data: outcomeGrades },
+] = await Promise.all([
+  studentIds.length > 0
+    ? supabase.from('grades').select('*').in('student_id', studentIds)
+    : Promise.resolve({ data: [] }),
+  teacherIds.length > 0
+    ? supabase.from('remarks').select('*').in('teacher_id', teacherIds)
+    : Promise.resolve({ data: [] }),
+  subStrandIds.length > 0
+    ? supabase.from('learning_outcomes').select('*').in('sub_strand_id', subStrandIds)
+    : Promise.resolve({ data: [] }),
+  studentIds.length > 0
+    ? supabase.from('outcome_grades').select('*').in('student_id', studentIds)
+    : Promise.resolve({ data: [] }),
+]);
     setStore({
       ...initStore(),
       schoolId,
@@ -1412,6 +1432,124 @@ async function saveEditStudent() {
     reader.readAsText(file);
   }
 
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+        <h1 style={{ fontSize:22, fontWeight:800 }}>Students</h1>
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={btn("ghost")} onClick={() => fileRef.current?.click()}>Import CSV/TSV</button>
+          <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" style={{ display:"none" }} onChange={e => { if(e.target.files[0]) handleCSV(e.target.files[0]); e.target.value=""; }} />
+          <button style={btn("primary")} onClick={() => { setForm(f => ({ ...f, curriculum:activeCurTab })); setShowAddModal(true); }}>+ Add Student</button>
+        </div>
+      </div>
+
+      {store.curricula.length > 1 && (
+        <div style={{ display:"flex", gap:4, marginBottom:16, background:COLORS.bg, padding:4, borderRadius:8, border:`1px solid ${COLORS.border}`, width:"fit-content" }}>
+          {store.curricula.map(c => (
+            <button key={c} onClick={() => setActiveCurTab(c)} style={{ padding:"7px 18px", borderRadius:6, border:"none", fontWeight:600, fontSize:13, cursor:"pointer", background:activeCurTab===c?(c==="CBC"?COLORS.teal:COLORS.amber):"transparent", color:activeCurTab===c?"#fff":(c==="CBC"?COLORS.teal:COLORS.amber), transition:"all 0.15s" }}>
+              {c === "CBC" ? "CBC" : "Cambridge"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginBottom:14 }}>
+        <input style={{ ...input(), maxWidth:320 }} placeholder="Search by name or admission number…" value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
+      {(() => {
+        const filteredClasses = store.classes.filter(c => c.curriculum === activeCurTab);
+        const filtered = store.students.filter(s =>
+          s.curriculum === activeCurTab &&
+          (s.name.toLowerCase().includes(search.toLowerCase()) || (s.admNo||s.adm_no||"").includes(search))
+        );
+
+        if (filtered.length === 0) {
+          return (
+            <div style={{ ...card(), padding:32, textAlign:"center", color:COLORS.text3 }}>
+              No students found. Import a roster or add students manually.
+            </div>
+          );
+        }
+
+        return filteredClasses.map(cls => {
+          return cls.streams.map(stream => {
+            const streamStudents = filtered.filter(s =>
+              s.grade === cls.grade && s.stream === stream.name
+            );
+            if (streamStudents.length === 0) return null;
+
+            return (
+              <div key={`${cls.id}-${stream.id}`} style={{ marginBottom:20 }}>
+                <div style={{ background:`linear-gradient(135deg,${COLORS.teal},${COLORS.teal2})`, borderRadius:"10px 10px 0 0", padding:"10px 16px", color:"#fff", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div>
+                    <span style={{ fontWeight:800, fontSize:15 }}>{cls.grade} — {stream.name}</span>
+                    <span style={{ fontSize:12, opacity:.8, marginLeft:10 }}>{streamStudents.length} student{streamStudents.length!==1?"s":""}</span>
+                  </div>
+                  <CurriculumBadge curriculum={activeCurTab} />
+                </div>
+                <div style={{ ...card(), borderRadius:"0 0 10px 10px", overflow:"auto", border:`1px solid ${COLORS.border}`, borderTop:"none" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
+                    <thead>
+                      <tr style={{ background:COLORS.bg }}>
+                        {["#","Adm No","Full Name","Gender","Actions"].map(h => (
+                          <th key={h} style={{ padding:"9px 14px", textAlign:"left", fontWeight:700, color:COLORS.text2, borderBottom:`1px solid ${COLORS.border}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {streamStudents.map((s, i) => (
+                        <tr key={s.id} style={{ borderBottom:`1px solid ${COLORS.border}` }}>
+                          <td style={{ padding:"8px 14px", color:COLORS.text3 }}>{i+1}</td>
+                          <td style={{ padding:"8px 14px", fontWeight:600, color:COLORS.amber }}>{s.admNo || s.adm_no}</td>
+                          <td style={{ padding:"8px 14px", fontWeight:500 }}>{s.name}</td>
+                          <td style={{ padding:"8px 14px", color:COLORS.text2 }}>{s.gender}</td>
+                          <td style={{ padding:"8px 14px", display:"flex", gap:6 }}>
+                            <button onClick={() => openEditStudent(s)} style={btn("secondary",{padding:"3px 10px",fontSize:12})}>Edit</button>
+                            <button onClick={() => deleteStudent(s.id)} style={btn("danger",{padding:"3px 10px",fontSize:12})}>Remove</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          });
+        });
+      })()}
+
+      {showAddModal && (
+        <Modal title="Add Student" onClose={() => setShowAddModal(false)}>
+          <Input label="Full Name" required value={form.name} onChange={e => setForm(f => ({ ...f, name:e.target.value }))} />
+          <Input label="Admission Number" required value={form.admNo} onChange={e => setForm(f => ({ ...f, admNo:e.target.value }))} />
+          <Select label="Gender" options={["Male","Female","Other"]} value={form.gender} onChange={e => setForm(f => ({ ...f, gender:e.target.value }))} />
+          <Select label="Curriculum" options={store.curricula} value={form.curriculum} onChange={e => setForm(f => ({ ...f, curriculum:e.target.value, grade:"", stream:"" }))} />
+          <Select label="Grade" required options={store.classes.filter(c=>c.curriculum===form.curriculum).map(c=>c.grade)} value={form.grade} onChange={e => setForm(f => ({ ...f, grade:e.target.value, stream:"" }))} />
+          <Select label="Stream" required options={(store.classes.find(c=>c.curriculum===form.curriculum&&c.grade===form.grade)?.streams||[]).map(s=>s.name)} value={form.stream} onChange={e => setForm(f => ({ ...f, stream:e.target.value }))} />
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:8 }}>
+            <button style={btn("ghost")} onClick={() => setShowAddModal(false)}>Cancel</button>
+            <button style={btn("primary")} onClick={addStudent}>Add Student</button>
+          </div>
+        </Modal>
+      )}
+
+      {editStudent && (
+        <Modal title="Edit Student" onClose={() => setEditStudent(null)}>
+          <Input label="Full Name" required value={editStudent.name} onChange={e => setEditStudent(f=>({...f,name:e.target.value}))} />
+          <Input label="Admission Number" required value={editStudent.admNo} onChange={e => setEditStudent(f=>({...f,admNo:e.target.value}))} />
+          <Select label="Gender" options={["Male","Female","Other"]} value={editStudent.gender} onChange={e => setEditStudent(f=>({...f,gender:e.target.value}))} />
+          <Select label="Grade" required options={store.classes.filter(c=>c.curriculum===editStudent.curriculum).map(c=>c.grade)} value={editStudent.grade} onChange={e => setEditStudent(f=>({...f,grade:e.target.value,stream:""}))} />
+          <Select label="Stream" required options={(store.classes.find(c=>c.curriculum===editStudent.curriculum&&c.grade===editStudent.grade)?.streams||[]).map(s=>s.name)} value={editStudent.stream} onChange={e => setEditStudent(f=>({...f,stream:e.target.value}))} />
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:8 }}>
+            <button style={btn("ghost")} onClick={() => setEditStudent(null)}>Cancel</button>
+            <button style={btn("primary")} onClick={saveEditStudent}>Save Changes</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
 // ─── TEACHERS MANAGER ─────────────────────────────────────────────────────────
 
 function TeachersManager({ store, updateStore, supabase }) {
