@@ -1801,6 +1801,7 @@ function ParentsManager({ store, updateStore, supabase }) {
   const [activeCurTab, setActiveCurTab] = useState(store.curricula[0] || "CBC");
   const [showModal, setShowModal] = useState(false);
   const [editParent, setEditParent] = useState(null);
+  const parentFileRef = useRef();
   const [form, setForm] = useState({ name:"", email:"", phone:"", password:"", childIds:[] });
 
  async function addParent() {
@@ -1846,6 +1847,106 @@ function ParentsManager({ store, updateStore, supabase }) {
     updateStore(s => ({ ...s, parents:s.parents.filter(p=>p.id!==id) }));
   }
 
+function handleParentCSV(file) {
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const lines = e.target.result.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) { alert("File appears empty."); return; }
+
+      const separator = lines[0].includes('\t') ? '\t' : ',';
+      const headers = lines[0].split(separator).map(h => h.trim().replace(/^"|"$/g, ""));
+
+      function findCol(cols, keywords) {
+        const idx = headers.findIndex(h => keywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
+        return idx >= 0 ? cols[idx]?.trim().replace(/^"|"$/g, "") : "";
+      }
+
+      const parsed = [];
+      let skipped = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(separator);
+        const name = findCol(cols, ["name","parent","guardian","father","mother"]);
+        const email = findCol(cols, ["email","mail"]);
+        const phone = findCol(cols, ["phone","tel","mobile","contact","number"]);
+        const admNo = findCol(cols, ["adm","admission","child","student","reg","roll","no"]);
+
+        if (!name || !email) { skipped++; continue; }
+
+        // Find child by admission number
+        const child = store.students.find(s =>
+          s.adm_no === admNo || s.admNo === admNo
+        );
+
+        parsed.push({ name, email, phone, admNo, childId: child?.id || null, childName: child?.name || "Not found" });
+      }
+
+      if (parsed.length === 0) {
+        alert(`No parents could be imported.\n\nHeaders found: ${headers.join(", ")}\n\nMake sure your file has columns for parent name, email and child admission number.`);
+        return;
+      }
+
+      const notFound = parsed.filter(p => !p.childId);
+      const confirmed = confirm(
+        `Ready to import ${parsed.length} parents${skipped > 0 ? ` (${skipped} rows skipped)` : ""}.\n\n` +
+        `Headers detected: ${headers.join(", ")}\n\n` +
+        `First parent: ${parsed[0].name} → Child: ${parsed[0].childName}\n\n` +
+        (notFound.length > 0 ? `⚠ ${notFound.length} parent(s) have unmatched admission numbers and will be imported without a child link.\n\n` : "") +
+        `Click OK to import or Cancel to check your file.`
+      );
+
+      if (!confirmed) return;
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const p of parsed) {
+        try {
+          // Create parent record in database
+          const { data: parent, error: parentError } = await supabase
+            .from('parents')
+            .insert({
+              school_id: store.schoolId,
+              name: p.name,
+              email: p.email,
+              phone: p.phone || "",
+              child_ids: p.childId ? [p.childId] : [],
+            })
+            .select()
+            .single();
+
+          if (parentError) { errorCount++; continue; }
+
+          // Create auth account — send magic link so parent sets own password
+          const { error: authError } = await supabase.auth.signUp({
+            email: p.email,
+            password: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
+            options: {
+              data: {
+                role: "parent",
+                name: p.name,
+                schoolId: store.schoolId,
+                linkedId: parent.id,
+              }
+            }
+          });
+
+          if (!authError) {
+            updateStore(s => ({ ...s, parents: [...s.parents, parent] }));
+            successCount++;
+          } else {
+            errorCount++;
+          }
+        } catch (err) {
+          errorCount++;
+        }
+      }
+
+      alert(`Import complete!\n✓ ${successCount} parents imported successfully${errorCount > 0 ? `\n✗ ${errorCount} failed (possibly duplicate emails)` : ""}\n\nParents will receive a confirmation email to set their password before logging in.`);
+    };
+    reader.readAsText(file);
+  }
+
 function openEditParent(parent) {
   setEditParent({
     id: parent.id,
@@ -1880,6 +1981,8 @@ async function saveEditParent() {
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
         <h1 style={{ fontSize:22, fontWeight:800 }}>Parents & Guardians</h1>
+        <button style={btn("ghost")} onClick={() => parentFileRef.current?.click()}>Import CSV</button>
+        <input ref={parentFileRef} type="file" accept=".csv,.tsv,.txt" style={{ display:"none" }} onChange={e => { if(e.target.files[0]) handleParentCSV(e.target.files[0]); e.target.value=""; }} />
         <button style={btn("primary")} onClick={() => setShowModal(true)}>+ Add Parent</button>
       </div>
       {store.curricula.length > 1 && (
@@ -1891,6 +1994,18 @@ async function saveEditParent() {
           ))}
         </div>
      )}
+     <div style={{ marginBottom:14, padding:"10px 14px", background:COLORS.tealL, borderRadius:8, fontSize:12, color:COLORS.teal2 }}>
+        CSV format: <strong>Parent Name, Email, Phone, Child Admission Number</strong> — one parent per row. 
+        <button onClick={() => {
+            const csv = "Parent Name,Email,Phone,Child Admission Number\nJane Kamau,jane@email.com,0712345678,ADM001\nJohn Otieno,john@email.com,0723456789,ADM002";
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'parents_template.csv'; a.click();
+        }} style={{ marginLeft:8, background:"none", border:"none", color:COLORS.teal2, cursor:"pointer", fontWeight:700, textDecoration:"underline", fontSize:12 }}>
+           Download template
+        </button>
+     </div>
       <div style={{ ...card(), overflow:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
           <thead>
