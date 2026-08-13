@@ -211,17 +211,12 @@ Add your Supabase environment variables in Vercel → Project Settings → Envir
 
 ## Roadmap
 
-- [x] CBC PP1 and PP2 with KICD pre-loaded data
-- [x] Cambridge grading with Checkpoint support
-- [x] PDF report card download
-- [x] Bulk student and parent CSV import
-- [x] Mobile-responsive layout
-- [ ] Grade 1–3 KICD pre-loaded data
-- [ ] Grade 4–6 KICD pre-loaded data
-- [ ] Grade 7–9 KICD pre-loaded data
-- [ ] SMS notifications to parents
-- [ ] AI photo upload for assessment book scanning
-- [ ] School admin analytics dashboard
+- CBC PP1 and PP2 with KICD pre-loaded data
+- Cambridge grading with Checkpoint support
+- PDF report card download
+- Bulk student and parent CSV import
+- Mobile-responsive layout
+
 
 
 ---
